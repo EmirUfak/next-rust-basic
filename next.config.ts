@@ -6,9 +6,7 @@ const bundleAnalyzer = withBundleAnalyzer({
 });
 
 const nextConfig: NextConfig = {
-  experimental: {
-    reactCompiler: true,
-  },
+  reactCompiler: true,
   webpack: (config) => {
     config.experiments = {
       ...config.experiments,
@@ -16,6 +14,23 @@ const nextConfig: NextConfig = {
       layers: true,
     };
     return config;
+  },
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin',
+          },
+          {
+            key: 'Cross-Origin-Embedder-Policy',
+            value: 'require-corp',
+          },
+        ],
+      },
+    ];
   },
 };
 
