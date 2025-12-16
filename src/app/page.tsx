@@ -6,7 +6,7 @@ export default function Home() {
       <Demo />
       <footer className="mt-12 text-sm text-gray-500">
         <a 
-          href="https://github.com/your-username/next-rust" 
+          href="https://github.com/emirufak/next-rust-basic" 
           target="_blank" 
           rel="noopener noreferrer"
           className="hover:text-gray-800 transition-colors flex items-center gap-2"

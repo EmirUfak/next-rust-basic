@@ -9,6 +9,7 @@ Next.js 16, React 19 ve Rust (WebAssembly) ile yüksek performanslı web uygulam
 - **Next.js 16 (App Router):** Server Components ve Turbopack (WASM uyumluluğu için Webpack konfigürasyonu yapılmış) dahil en güncel özellikler.
 - **Rust & WebAssembly:** Yüksek performanslı hesaplama işlemleri için entegre `wasm-pack` iş akışı.
 - **Web Workers:** Ağır hesaplamaların ana thread'i bloklamaması için Web Worker entegrasyonu.
+- **SharedArrayBuffer:** Worker ve Ana Thread arasında sıfır kopyalama (zero-copy) veri transferi desteği.
 - **React 19:** Otomatik optimizasyon için deneysel React Compiler aktif.
 - **TypeScript:** Tip güvenliği için Strict mod açık.
 - **State Management:** Verimli global durum yönetimi için Zustand.
@@ -85,9 +86,9 @@ npx create-next-app -e https://github.com/emirufak/next-rust-basic projenizin-ad
 
 1.  `crates/wasm/src/lib.rs` dosyasını düzenleyin.
 2.  Fonksiyonları `#[wasm_bindgen]` kullanarak dışa aktarın.
-3.  `npm workers/` altında yeni bir worker oluşturun veya mevcut worker'a ekleyin.
-5.  React bileşenlerinizde worker'ı çağırarak sunucusunu yeniden başlatın).
-4.  `src/hooks/use-wasm.ts` üzerinden React bileşenlerinizde import edip kullanın.
+3.  `npm run build:wasm` komutunu çalıştırın.
+4.  `src/workers/` altında yeni bir worker oluşturun veya mevcut worker'a ekleyin.
+5.  React bileşenlerinizde worker'ı çağırarak kullanın.
 
 ## Lisans
 
@@ -105,6 +106,8 @@ A production-ready template for building high-performance web applications with 
 
 - **Next.js 16 (App Router):** Latest features including Server Components and Turbopack (configured for Webpack for WASM compatibility).
 - **Rust & WebAssembly:** Integrated `wasm-pack` workflow for high-performance computing tasks.
+- **Web Workers:** Web Worker integration to prevent blocking the main thread during heavy computations.
+- **SharedArrayBuffer:** Support for zero-copy data transfer between Worker and Main Thread.
 - **React 19:** Experimental React Compiler enabled for automatic optimization.
 - **TypeScript:** Strict mode enabled for type safety.
 - **State Management:** Zustand for efficient global state management.
@@ -158,8 +161,9 @@ npx create-next-app -e https://github.com/emirufak/next-rust-basic your-project-
 │   └── wasm/               # Rust source code (wasm-lib)
 ├── public/                 # Static assets
 ├── src/
-│   ├── app/                # Next.js App Router pages
-│   ├── components/         # React components
+│   ├── app/                # Next.js App 
+│   ├── lib/                # Utility functions & State management
+│   ├── workers/            # Web Worker files
 │   ├── hooks/              # Custom hooks (including WASM loader)
 │   ├── lib/                # Utility functions & State management
 ├── next.config.ts          # Next.js configuration (WASM & Analyzer)
@@ -177,8 +181,9 @@ npx create-next-app -e https://github.com/emirufak/next-rust-basic your-project-
 ## Development
 
 ### Adding Rust Code
-
-1.  Edit `crates/wasm/src/lib.rs`.
+.
+4.  Create or update a worker in `src/workers/`.
+5.  Import and use the worker in your React components
 2.  Expose functions using `#[wasm_bindgen]`.
 3.  Run `npm run build:wasm` (or restart the dev server if you have a watcher set up).
 4.  Import and use in your React components via `src/hooks/use-wasm.ts`.
