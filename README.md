@@ -10,7 +10,7 @@ Next.js 16, React 19 ve Rust (WebAssembly) ile yüksek performanslı web uygulam
 - **Rust & WebAssembly:** Yüksek performanslı hesaplama işlemleri için entegre `wasm-pack` iş akışı.
 - **Web Workers:** Ağır hesaplamaların ana thread'i bloklamaması için Web Worker entegrasyonu.
 - **SharedArrayBuffer:** Worker ve Ana Thread arasında sıfır kopyalama (zero-copy) veri transferi desteği.
-- **React 19:** Otomatik optimizasyon için deneysel React Compiler aktif.
+- **React 19:** Otomatik optimizasyon için React Compiler aktif.
 - **TypeScript:** Tip güvenliği için Strict mod açık.
 - **State Management:** Verimli global durum yönetimi için Zustand.
 - **Performans Analizi:** `@next/bundle-analyzer` önceden yapılandırılmış.
@@ -108,7 +108,7 @@ A production-ready template for building high-performance web applications with 
 - **Rust & WebAssembly:** Integrated `wasm-pack` workflow for high-performance computing tasks.
 - **Web Workers:** Web Worker integration to prevent blocking the main thread during heavy computations.
 - **SharedArrayBuffer:** Support for zero-copy data transfer between Worker and Main Thread.
-- **React 19:** Experimental React Compiler enabled for automatic optimization.
+- **React 19:** React Compiler enabled for automatic optimization.
 - **TypeScript:** Strict mode enabled for type safety.
 - **State Management:** Zustand for efficient global state management.
 - **Performance Analysis:** `@next/bundle-analyzer` pre-configured.
