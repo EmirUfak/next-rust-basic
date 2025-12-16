@@ -8,6 +8,7 @@ Next.js 16, React 19 ve Rust (WebAssembly) ile yüksek performanslı web uygulam
 
 - **Next.js 16 (App Router):** Server Components ve Turbopack (WASM uyumluluğu için Webpack konfigürasyonu yapılmış) dahil en güncel özellikler.
 - **Rust & WebAssembly:** Yüksek performanslı hesaplama işlemleri için entegre `wasm-pack` iş akışı.
+- **Web Workers:** Ağır hesaplamaların ana thread'i bloklamaması için Web Worker entegrasyonu.
 - **React 19:** Otomatik optimizasyon için deneysel React Compiler aktif.
 - **TypeScript:** Tip güvenliği için Strict mod açık.
 - **State Management:** Verimli global durum yönetimi için Zustand.
@@ -29,14 +30,14 @@ Bu şablonu kullanarak yeni bir proje oluşturmanın en kolay yolu:
 ### Yöntem 1: create-next-app ile (Önerilen)
 
 ```bash
-npx create-next-app -e https://github.com/kullanici-adiniz/next-rust-basic projenizin-adi
+npx create-next-app -e https://github.com/emirufak/next-rust-basic projenizin-adi
 ```
 
 ### Yöntem 2: Manuel Kurulum
 
 1.  **Depoyu klonlayın:**
     ```bash
-    git clone https://github.com/kullanici-adiniz/next-rust-basic.git projenizin-adi
+    git clone https://github.com/emirufak/next-rust-basic.git projenizin-adi
     cd projenizin-adi
     ```
 
@@ -63,8 +64,9 @@ npx create-next-app -e https://github.com/kullanici-adiniz/next-rust-basic proje
 ├── src/
 │   ├── app/                # Next.js App Router sayfaları
 │   ├── components/         # React bileşenleri
-│   ├── hooks/              # Custom hook'lar (WASM yükleyici dahil)
+│   ├── hooks/              # Custom hook'lar
 │   ├── lib/                # Yardımcı fonksiyonlar & State yönetimi
+│   ├── workers/            # Web Worker dosyaları
 ├── next.config.ts          # Next.js konfigürasyonu (WASM & Analyzer)
 └── package.json            # Proje betikleri ve bağımlılıklar
 ```
@@ -83,7 +85,8 @@ npx create-next-app -e https://github.com/kullanici-adiniz/next-rust-basic proje
 
 1.  `crates/wasm/src/lib.rs` dosyasını düzenleyin.
 2.  Fonksiyonları `#[wasm_bindgen]` kullanarak dışa aktarın.
-3.  `npm run build:wasm` komutunu çalıştırın (veya watcher kuruluysa dev sunucusunu yeniden başlatın).
+3.  `npm workers/` altında yeni bir worker oluşturun veya mevcut worker'a ekleyin.
+5.  React bileşenlerinizde worker'ı çağırarak sunucusunu yeniden başlatın).
 4.  `src/hooks/use-wasm.ts` üzerinden React bileşenlerinizde import edip kullanın.
 
 ## Lisans
@@ -123,14 +126,14 @@ The easiest way to create a new project using this template:
 ### Method 1: Using create-next-app (Recommended)
 
 ```bash
-npx create-next-app -e https://github.com/your-username/next-rust-basic your-project-name
+npx create-next-app -e https://github.com/emirufak/next-rust-basic your-project-name
 ```
 
 ### Method 2: Manual Setup
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/next-rust-basic.git your-project-name
+    git clone https://github.com/emirufak/next-rust-basic.git your-project-name
     cd your-project-name
     ```
 
