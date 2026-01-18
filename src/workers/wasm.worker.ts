@@ -140,14 +140,14 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       }
 
       case 'warmup': {
-        // JIT Warming / WASM Tier-up
+        // JIT Warming / WASM Tier-up - Reduced load to prevent blocking
         try {
-          // 1. Fibonacci
-          fibonacci(35);
-          fibonacciJS(35);
+          // 1. Fibonacci (lighter)
+          fibonacci(28);
+          fibonacciJS(28);
 
           // 2. Matrix Multiplication (small)
-          const n = 50;
+          const n = 30;
           const a = new Float64Array(n * n).fill(1.0);
           const b = new Float64Array(n * n).fill(1.0);
           const c = new Float64Array(n * n);
@@ -155,16 +155,16 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           matrixMultiplyJS(a, b, c, n);
 
           // 3. Quicksort
-          const arr = new Float64Array(1000).map(() => Math.random());
+          const arr = new Float64Array(500).map(() => Math.random());
           quicksort(arr.slice()); // copy
           quicksortJS(arr.slice());
 
-          // 4. SharedArrayBuffer (if supported)
+          // 4. SharedArrayBuffer
           if (self.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined') {
-            const length = 100;
+            const length = 50;
             const sab = new SharedArrayBuffer(length * 4);
             const view = new Uint32Array(sab);
-            for(let i=0; i<length; i++) view[i] = 10; // fib(10)
+            for(let i=0; i<length; i++) view[i] = 10;
             process_shared_buffer(view);
           }
         } catch (e) {

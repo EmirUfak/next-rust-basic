@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSyncExternalStore, useEffect, useMemo, useRef, useState } from 'react';
 import {
   MAX_BUFFER_LENGTH,
   WORKER_PROTOCOL_VERSION,
@@ -15,12 +15,23 @@ const MAX_ARRAY_SIZE = 15_000_000;
 export default function Demo() {
   const [isWorkerReady, setIsWorkerReady] = useState(false);
   const [workerError, setWorkerError] = useState<string | null>(null);
-  const [crossOriginIsolated] = useState(() => 
-    typeof window !== 'undefined' && 'crossOriginIsolated' in window 
-      ? window.crossOriginIsolated 
-      : false
+  const crossOriginIsolated = useSyncExternalStore(
+    () => () => {},
+    () => typeof window !== 'undefined' ? window.crossOriginIsolated : false,
+    () => false
   );
   const poolRef = useRef<WorkerPool | null>(null);
+
+  useEffect(() => {
+    // Debug info
+    if (typeof window !== 'undefined') {
+       console.log('SAB Support:', {
+         crossOriginIsolated: window.crossOriginIsolated,
+         isSecureContext: window.isSecureContext,
+         origin: window.location.origin
+       });
+    }
+  }, []);
   
   // Fibonacci State
   const [fibN, setFibN] = useState(35);
@@ -312,7 +323,7 @@ export default function Demo() {
   const sortSpeedup = getSpeedup(sortJsTime, sortWasmTime);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
+    <div className="min-h-screen bg-linear-to-br from-slate-50 to-slate-100 p-8">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
@@ -374,7 +385,7 @@ export default function Demo() {
             <button
               onClick={runFibonacciComparison}
               disabled={!isWorkerReady || fibLoading}
-              className="w-full py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 disabled:opacity-50 transition-all mb-4"
+              className="w-full py-3 bg-linear-to-r from-blue-500 to-blue-600 text-white rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 disabled:opacity-50 transition-all mb-4"
             >
               {fibLoading ? '⏳ Running...' : '⚡ Run Comparison'}
             </button>
@@ -417,7 +428,7 @@ export default function Demo() {
             <button
               onClick={runMatrixComparison}
               disabled={!isWorkerReady || matrixLoading || !crossOriginIsolated}
-              className="w-full py-3 bg-gradient-to-r from-red-500 to-orange-500 text-white rounded-lg font-medium hover:from-red-600 hover:to-orange-600 disabled:opacity-50 transition-all mb-4"
+              className="w-full py-3 bg-linear-to-r from-red-500 to-orange-500 text-white rounded-lg font-medium hover:from-red-600 hover:to-orange-600 disabled:opacity-50 transition-all mb-4"
             >
               {matrixLoading ? '⏳ Running...' : '⚡ Run Comparison'}
             </button>
@@ -458,7 +469,7 @@ export default function Demo() {
             <button
               onClick={runSortComparison}
               disabled={!isWorkerReady || sortLoading || !crossOriginIsolated}
-              className="w-full py-3 bg-gradient-to-r from-yellow-400 to-orange-500 text-white rounded-lg font-medium hover:from-yellow-500 hover:to-orange-600 disabled:opacity-50 transition-all mb-4"
+              className="w-full py-3 bg-linear-to-r from-yellow-400 to-orange-500 text-white rounded-lg font-medium hover:from-yellow-500 hover:to-orange-600 disabled:opacity-50 transition-all mb-4"
             >
               {sortLoading ? '⏳ Running...' : '⚡ Run Comparison'}
             </button>
@@ -491,7 +502,7 @@ export default function Demo() {
             <button
               onClick={runSharedBufferDemo}
               disabled={!isWorkerReady || sabLoading || !crossOriginIsolated}
-              className="w-full py-3 bg-gradient-to-r from-orange-400 to-red-500 text-white rounded-lg font-medium hover:from-orange-500 hover:to-red-600 disabled:opacity-50 transition-all mb-4"
+              className="w-full py-3 bg-linear-to-r from-orange-400 to-red-500 text-white rounded-lg font-medium hover:from-orange-500 hover:to-red-600 disabled:opacity-50 transition-all mb-4"
             >
               {sabLoading ? '⏳ Running...' : '🔥 Run Batch'}
             </button>
