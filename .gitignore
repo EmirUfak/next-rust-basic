@@ -45,5 +45,7 @@ next-env.d.ts
 target/
 crates/wasm/pkg/
 crates/wasm/target/
+.wasm/
 **/*.rs.bk
 
+documents

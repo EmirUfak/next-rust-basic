@@ -15,3 +15,8 @@ pub fn process_shared_buffer(arr: &mut [u32]) {
         arr[i] = fibonacci(arr[i]);
     }
 }
+
+#[wasm_bindgen]
+pub fn sum_u32(arr: &[u32]) -> u32 {
+    arr.iter().copied().sum()
+}
