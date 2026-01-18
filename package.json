@@ -1,15 +1,20 @@
 {
   "name": "next-rust-basic",
-  "version": "0.3.0",
+  "version": "3.0.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/maybe-build-wasm.mjs",
     "dev": "next dev --webpack",
+    "prebuild": "node scripts/maybe-build-wasm.mjs",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
     "analyze": "cross-env ANALYZE=true next build",
-    "build:wasm": "cd crates/wasm && wasm-pack build --target web",
-    "postinstall": "npm run build:wasm"
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "postinstall": "node scripts/maybe-build-wasm.mjs",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "babel-plugin-react-compiler": "^1.0.0",
@@ -20,6 +25,7 @@
   },
   "devDependencies": {
     "@next/bundle-analyzer": "^16.0.10",
+    "@playwright/test": "^1.50.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -27,8 +33,10 @@
     "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.0.10",
+    "jsdom": "^24.0.0",
     "tailwindcss": "^4",
+    "ts-loader": "^9.5.1",
     "typescript": "^5",
-    "wasm-pack": "^0.13.1"
+    "vitest": "^4.0.17"
   }
 }

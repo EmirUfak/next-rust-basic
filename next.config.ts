@@ -13,6 +13,19 @@ const nextConfig: NextConfig = {
       asyncWebAssembly: true,
       layers: true,
     };
+
+    config.module.rules.push({
+      test: /\.worker\.ts$/,
+      use: [
+        {
+          loader: require.resolve('ts-loader'),
+          options: {
+            transpileOnly: true,
+          },
+        },
+      ],
+    });
+
     return config;
   },
   async headers() {
