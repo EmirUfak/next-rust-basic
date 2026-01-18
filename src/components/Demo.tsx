@@ -1,9 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fibonacciJS } from '../lib/fibonacci';
-import { log, measure } from '../lib/logger';
-import { useStore } from '../lib/store';
 import {
   MAX_BUFFER_LENGTH,
   WORKER_PROTOCOL_VERSION,
@@ -11,50 +8,77 @@ import {
 } from '../workers/worker-messages';
 import { WorkerPool } from '../workers/worker-pool';
 
+// Constants
+const MAX_MATRIX_SIZE = 1500;
+const MAX_ARRAY_SIZE = 15_000_000;
+
 export default function Demo() {
-  const { rustResult, jsResult, rustTime, jsTime, setRustResult, setJsResult } = useStore();
-  const [input, setInput] = useState(30);
   const [isWorkerReady, setIsWorkerReady] = useState(false);
-  const [sharedBufferTime, setSharedBufferTime] = useState<number | null>(null);
-  const [sumResult, setSumResult] = useState<number | null>(null);
-  const [sumTime, setSumTime] = useState<number | null>(null);
-  const [sumSize, setSumSize] = useState(200_000);
-  const [streamSum, setStreamSum] = useState<number | null>(null);
-  const [streamTime, setStreamTime] = useState<number | null>(null);
-  const [streamSize, setStreamSize] = useState(500_000);
-  const [streamChunkSize, setStreamChunkSize] = useState(50_000);
-  const [batchIterations, setBatchIterations] = useState(50);
-  const [batchJsTime, setBatchJsTime] = useState<number | null>(null);
-  const [batchWasmTime, setBatchWasmTime] = useState<number | null>(null);
-  const [batchResult, setBatchResult] = useState<number | null>(null);
   const [workerError, setWorkerError] = useState<string | null>(null);
-  const [crossOriginIsolated, setCrossOriginIsolated] = useState<boolean | null>(null);
+  const [crossOriginIsolated] = useState(() => 
+    typeof window !== 'undefined' && 'crossOriginIsolated' in window 
+      ? window.crossOriginIsolated 
+      : false
+  );
   const poolRef = useRef<WorkerPool | null>(null);
+  
+  // Fibonacci State
+  const [fibN, setFibN] = useState(35);
+  const [fibIterations, setFibIterations] = useState(50);
+  const [fibJsTime, setFibJsTime] = useState<number | null>(null);
+  const [fibWasmTime, setFibWasmTime] = useState<number | null>(null);
+  const [fibJsResult, setFibJsResult] = useState<number | null>(null);
+  const [fibWasmResult, setFibWasmResult] = useState<number | null>(null);
+  const [fibLoading, setFibLoading] = useState(false);
+  
+  // Matrix State
+  const [matrixSize, setMatrixSize] = useState(300);
+  const [matrixJsTime, setMatrixJsTime] = useState<number | null>(null);
+  const [matrixWasmTime, setMatrixWasmTime] = useState<number | null>(null);
+  const [matrixLoading, setMatrixLoading] = useState(false);
+  
+  // Quicksort State
+  const [sortSize, setSortSize] = useState(10_000_000);
+  const [sortJsTime, setSortJsTime] = useState<number | null>(null);
+  const [sortWasmTime, setSortWasmTime] = useState<number | null>(null);
+  const [sortLoading, setSortLoading] = useState(false);
+  
+  // SharedArrayBuffer State
+  const [sabTime, setSabTime] = useState<number | null>(null);
+  const [sabLoading, setSabLoading] = useState(false);
+  const [sabCompleted, setSabCompleted] = useState(false);
+  
   const poolSize = useMemo(() => {
     if (typeof navigator === 'undefined') return 1;
     return Math.max(1, Math.min(4, navigator.hardwareConcurrency ?? 2));
   }, []);
 
-  function createRequestId() {
+  const createRequestId = () => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
       return crypto.randomUUID();
     }
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
+  };
 
-  useEffect(() => {
-    setCrossOriginIsolated(
-      typeof window !== 'undefined' ? window.crossOriginIsolated : false
-    );
-  }, []);
+
 
   useEffect(() => {
     const pool = new WorkerPool(poolSize);
     poolRef.current = pool;
 
     pool
-      .init(() => new Worker(new URL('../workers/fibonacci.worker.ts', import.meta.url), { type: 'module' }))
-      .then(() => setIsWorkerReady(true))
+      .init(() => new Worker(new URL('../workers/wasm.worker.ts', import.meta.url), { type: 'module' }))
+      .then(() => {
+        setIsWorkerReady(true);
+        // Trigger JIT Warmup for all workers
+        for (let i = 0; i < poolSize; i++) {
+          pool.request({
+            type: 'warmup',
+            requestId: `warmup-${i}`,
+            version: WORKER_PROTOCOL_VERSION,
+          }).catch(e => console.warn('Warmup failed', e));
+        }
+      })
       .catch((error) => {
         setWorkerError(error instanceof Error ? error.message : 'Worker init error');
       });
@@ -66,482 +90,434 @@ export default function Demo() {
 
   const postRequest = (request: WorkerRequest) => {
     const pool = poolRef.current;
-
     if (!pool) {
       return Promise.reject(new Error('Worker pool is not initialized'));
     }
-
     return pool.request(request);
   };
 
-  const runJs = () => {
-    const stopMeasure = measure('js-fibonacci');
-    const start = performance.now();
-    const res = fibonacciJS(input);
-    const end = performance.now();
-    stopMeasure();
-    setJsResult(res, end - start);
-    log('info', 'JS fibonacci computed', { input, duration: end - start });
-  };
-
-  const runJsBatch = () => {
-    const iterations = Math.max(1, Math.floor(batchIterations));
-    const stopMeasure = measure('js-fibonacci-batch');
-    const start = performance.now();
-    let result = 0;
-    for (let i = 0; i < iterations; i += 1) {
-      result = fibonacciJS(input);
-    }
-    const end = performance.now();
-    stopMeasure();
-    setBatchResult(result);
-    setBatchJsTime(end - start);
-    log('info', 'JS fibonacci batch', { input, iterations, duration: end - start });
-  };
-
-  const runRust = async () => {
+  // ========== FIBONACCI (JS runs in worker too) ==========
+  const runFibonacciComparison = async () => {
     if (!poolRef.current) return;
-
+    setFibLoading(true);
     setWorkerError(null);
-    setRustResult(0, 0);
-    const start = performance.now();
-    const requestId = createRequestId();
-    const stopMeasure = measure('wasm-fibonacci');
 
     try {
-      const message = await postRequest({
-        type: 'fibonacci',
-        requestId,
+      // Run JS in worker
+      const jsStart = performance.now();
+      const jsMessage = await postRequest({
+        type: 'fibonacciBatchJs',
+        requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
-        n: input,
+        n: fibN,
+        iterations: fibIterations,
       });
 
-      if (message.type === 'fibonacciResult') {
-        const end = performance.now();
-        stopMeasure();
-        setRustResult(message.result, end - start);
-        log('info', 'WASM fibonacci computed', { input, duration: end - start });
+      const jsEnd = performance.now();
+      if (jsMessage.type === 'fibonacciBatchJsResult') {
+        setFibJsTime(jsEnd - jsStart);
+        setFibJsResult(jsMessage.result);
       }
-    } catch (error) {
-      setWorkerError(error instanceof Error ? error.message : 'Worker error');
-    }
-  };
 
-  const runRustBatch = async () => {
-    if (!poolRef.current) return;
-
-    setWorkerError(null);
-    const iterations = Math.max(1, Math.floor(batchIterations));
-    const start = performance.now();
-    const requestId = createRequestId();
-    const stopMeasure = measure('wasm-fibonacci-batch');
-
-    try {
-      const message = await postRequest({
+      // Run WASM in worker
+      const wasmStart = performance.now();
+      const wasmMessage = await postRequest({
         type: 'fibonacciBatch',
-        requestId,
+        requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
-        n: input,
-        iterations,
+        n: fibN,
+        iterations: fibIterations,
       });
-
-      if (message.type === 'fibonacciBatchResult') {
-        const end = performance.now();
-        stopMeasure();
-        setBatchResult(message.result);
-        setBatchWasmTime(end - start);
-        log('info', 'WASM fibonacci batch', { input, iterations, duration: end - start });
+      const wasmEnd = performance.now();
+      if (wasmMessage.type === 'fibonacciBatchResult') {
+        setFibWasmTime(wasmEnd - wasmStart);
+        setFibWasmResult(wasmMessage.result);
       }
     } catch (error) {
       setWorkerError(error instanceof Error ? error.message : 'Worker error');
     }
+    setFibLoading(false);
   };
 
-  const runSharedBuffer = async () => {
+  // ========== MATRIX MULTIPLICATION (JS runs in worker) ==========
+  const runMatrixComparison = async () => {
     if (!poolRef.current) return;
+    setMatrixLoading(true);
+    setWorkerError(null);
 
+    const n = Math.min(matrixSize, MAX_MATRIX_SIZE);
+    const size = n * n;
+    
+    const aBuffer = new SharedArrayBuffer(size * 8);
+    const bBuffer = new SharedArrayBuffer(size * 8);
+    const cBuffer = new SharedArrayBuffer(size * 8);
+    const controlBuffer = new SharedArrayBuffer(4);
+    
+    const a = new Float64Array(aBuffer);
+    const b = new Float64Array(bBuffer);
+    const control = new Int32Array(controlBuffer);
+    
+    // Initialize matrices
+    for (let i = 0; i < size; i++) {
+      a[i] = Math.random();
+      b[i] = Math.random();
+    }
+
+    try {
+      // Run JS in worker
+      Atomics.store(control, 0, 0);
+      const jsStart = performance.now();
+      await postRequest({
+        type: 'matrixMultiplyJs',
+        requestId: createRequestId(),
+        version: WORKER_PROTOCOL_VERSION,
+        aBuffer,
+        bBuffer,
+        cBuffer,
+        control: controlBuffer,
+        n,
+      });
+      const jsEnd = performance.now();
+      setMatrixJsTime(jsEnd - jsStart);
+
+      // Run WASM in worker
+      Atomics.store(control, 0, 0);
+      const wasmStart = performance.now();
+      await postRequest({
+        type: 'matrixMultiply',
+        requestId: createRequestId(),
+        version: WORKER_PROTOCOL_VERSION,
+        aBuffer,
+        bBuffer,
+        cBuffer,
+        control: controlBuffer,
+        n,
+      });
+      const wasmEnd = performance.now();
+      setMatrixWasmTime(wasmEnd - wasmStart);
+    } catch (error) {
+      setWorkerError(error instanceof Error ? error.message : 'Worker error');
+    }
+    setMatrixLoading(false);
+  };
+
+  // ========== QUICKSORT (JS runs in worker) ==========
+  const runSortComparison = async () => {
+    if (!poolRef.current) return;
+    setSortLoading(true);
+    setWorkerError(null);
+
+    const length = Math.min(sortSize, Math.min(MAX_ARRAY_SIZE, MAX_BUFFER_LENGTH));
+    const buffer = new SharedArrayBuffer(length * 8);
+    const controlBuffer = new SharedArrayBuffer(4);
+    const arr = new Float64Array(buffer);
+    const control = new Int32Array(controlBuffer);
+
+    // Initialize with random data
+    for (let i = 0; i < length; i++) {
+      arr[i] = Math.random();
+    }
+
+    try {
+      // Run JS in worker
+      Atomics.store(control, 0, 0);
+      const jsStart = performance.now();
+      await postRequest({
+        type: 'quicksortJs',
+        requestId: createRequestId(),
+        version: WORKER_PROTOCOL_VERSION,
+        buffer,
+        control: controlBuffer,
+        length,
+      });
+      const jsEnd = performance.now();
+      setSortJsTime(jsEnd - jsStart);
+
+      // Re-shuffle for WASM test
+      for (let i = 0; i < length; i++) {
+        arr[i] = Math.random();
+      }
+
+      // Run WASM in worker
+      Atomics.store(control, 0, 0);
+      const wasmStart = performance.now();
+      await postRequest({
+        type: 'quicksort',
+        requestId: createRequestId(),
+        version: WORKER_PROTOCOL_VERSION,
+        buffer,
+        control: controlBuffer,
+        length,
+      });
+      const wasmEnd = performance.now();
+      setSortWasmTime(wasmEnd - wasmStart);
+    } catch (error) {
+      setWorkerError(error instanceof Error ? error.message : 'Worker error');
+    }
+    setSortLoading(false);
+  };
+
+  // ========== SHARED ARRAY BUFFER ==========
+  const runSharedBufferDemo = async () => {
+    if (!poolRef.current) return;
+    setSabLoading(true);
+    setSabCompleted(false);
     setWorkerError(null);
 
     if (!crossOriginIsolated) {
-      setWorkerError('SharedArrayBuffer requires COOP/COEP headers in production.');
+      setWorkerError('SharedArrayBuffer requires COOP/COEP headers.');
+      setSabLoading(false);
       return;
     }
 
-    // Create a SharedArrayBuffer
-    // Note: This requires Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers
     try {
       const length = 1000;
-      if (length > MAX_BUFFER_LENGTH) {
-        throw new Error(`Shared buffer length exceeds limit (${MAX_BUFFER_LENGTH}).`);
-      }
-      const sab = new SharedArrayBuffer(length * 4); // 4 bytes per u32
+      const sab = new SharedArrayBuffer(length * 4);
       const controlBuffer = new SharedArrayBuffer(4);
       const control = new Int32Array(controlBuffer);
-      Atomics.store(control, 0, 0);
       const arr = new Uint32Array(sab);
 
-      // Fill with some data (e.g., all 20s)
       for (let i = 0; i < length; i++) {
         arr[i] = 20;
       }
 
-      const stopMeasure = measure('wasm-shared-buffer');
+      Atomics.store(control, 0, 0);
       const start = performance.now();
-      const requestId = createRequestId();
-      const message = await postRequest({
+      
+      await postRequest({
         type: 'sharedBufferProcess',
-        requestId,
+        requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
         buffer: sab,
         control: controlBuffer,
         length,
       });
 
-      if (message.type === 'sharedBufferDone') {
-        const waitAsync = (Atomics as { waitAsync?: typeof Atomics.waitAsync }).waitAsync;
-        if (typeof waitAsync === 'function') {
-          await waitAsync(control, 0, 0).value;
-        } else {
-          await new Promise<void>((resolve) => {
-            const handle = setInterval(() => {
-              if (Atomics.load(control, 0) === 1) {
-                clearInterval(handle);
-                resolve();
-              }
-            }, 5);
-          });
-        }
-        const end = performance.now();
-        stopMeasure();
-        setSharedBufferTime(end - start);
-        log('info', 'Shared buffer processed', {
-          duration: end - start,
-          preview: Array.from(arr.slice(0, 5)),
-        });
-      }
+      const end = performance.now();
+      setSabTime(end - start);
+      setSabCompleted(true);
     } catch (error) {
-      log('error', 'SharedArrayBuffer error', error);
-      setWorkerError(
-        error instanceof Error
-          ? error.message
-          : 'SharedArrayBuffer is not supported or headers are missing.'
-      );
+      setWorkerError(error instanceof Error ? error.message : 'SAB error');
     }
+    setSabLoading(false);
   };
 
-  const runSumArray = async () => {
-    if (!poolRef.current) return;
-
-    setWorkerError(null);
-    setSumResult(null);
-    setSumTime(null);
-
-    const length = Math.max(1, Math.floor(sumSize));
-    if (length > MAX_BUFFER_LENGTH) {
-      setWorkerError(`Array length exceeds limit (${MAX_BUFFER_LENGTH}).`);
-      return;
-    }
-    const data = new Uint32Array(length);
-    data.fill(20);
-
-    const stopMeasure = measure('wasm-sum-array');
-    const start = performance.now();
-    const requestId = createRequestId();
-
-    try {
-      const message = await postRequest({
-        type: 'sumArray',
-        requestId,
-        version: WORKER_PROTOCOL_VERSION,
-        data,
-      });
-
-      if (message.type === 'sumArrayResult') {
-        const end = performance.now();
-        stopMeasure();
-        setSumResult(message.result);
-        setSumTime(end - start);
-        log('info', 'WASM sum array computed', { length, duration: end - start });
-      }
-    } catch (error) {
-      setWorkerError(error instanceof Error ? error.message : 'Worker error');
-    }
+  const getSpeedup = (jsTime: number | null, wasmTime: number | null) => {
+    if (!jsTime || !wasmTime || wasmTime === 0) return null;
+    return jsTime / wasmTime;
   };
 
-  const runStreamedSum = async () => {
-    if (!poolRef.current) return;
-
-    setWorkerError(null);
-    setStreamSum(null);
-    setStreamTime(null);
-
-    const totalSize = Math.max(1, Math.floor(streamSize));
-    const chunkSize = Math.max(1, Math.floor(streamChunkSize));
-
-    const stream = new ReadableStream<Uint32Array>({
-      start(controller) {
-        let produced = 0;
-
-        const push = () => {
-          if (produced >= totalSize) {
-            controller.close();
-            return;
-          }
-
-          const current = Math.min(chunkSize, totalSize - produced);
-          const chunk = new Uint32Array(current);
-          chunk.fill(20);
-          produced += current;
-          controller.enqueue(chunk);
-          queueMicrotask(push);
-        };
-
-        push();
-      },
-    });
-
-    let sum = 0;
-    const stopMeasure = measure('wasm-streamed-sum');
-    const start = performance.now();
-
-    const reader = stream.getReader();
-
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) break;
-      if (!value) continue;
-
-      if (value.length > MAX_BUFFER_LENGTH) {
-        setWorkerError(`Chunk length exceeds limit (${MAX_BUFFER_LENGTH}).`);
-        return;
-      }
-
-      const message = await postRequest({
-        type: 'sumArray',
-        requestId: createRequestId(),
-        version: WORKER_PROTOCOL_VERSION,
-        data: value,
-      });
-
-      if (message.type === 'sumArrayResult') {
-        sum += message.result;
-      }
-    }
-
-    const end = performance.now();
-    stopMeasure();
-    setStreamSum(sum);
-    setStreamTime(end - start);
-    log('info', 'Streamed sum completed', { totalSize, chunkSize, duration: end - start });
-  };
-
-  const showSabWarning = crossOriginIsolated === false;
+  const fibSpeedup = getSpeedup(fibJsTime, fibWasmTime);
+  const matrixSpeedup = getSpeedup(matrixJsTime, matrixWasmTime);
+  const sortSpeedup = getSpeedup(sortJsTime, sortWasmTime);
 
   return (
-    <div className="flex flex-col items-center gap-8 p-8 w-full">
-      <h1 className="text-3xl font-bold">Next.js + Rust (WASM) Template (next-rust-basic)</h1>
-      
-      <div className="flex gap-4 items-center">
-        <label>Fibonacci N:</label>
-        <input 
-          type="number" 
-          value={input} 
-          onChange={(e) => setInput(Number(e.target.value))}
-          className="p-2 border rounded text-black"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8 w-full max-w-6xl">
-        {/* JS Section */}
-        <div className="p-6 border border-gray-200 rounded-xl bg-white shadow-sm">
-          <h2 className="text-xl font-bold mb-4 text-yellow-600">JavaScript (Main Thread)</h2>
-          <button 
-            onClick={runJs}
-            className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 rounded text-white mb-4 transition-colors shadow-sm"
-          >
-            Run JS Calculation
-          </button>
-          {jsResult !== null && (
-            <div className="space-y-2">
-              <p className="text-lg text-gray-800">Result: <span className="font-mono font-bold">{jsResult}</span></p>
-              <p className="text-sm text-gray-500">Time: <span className="text-gray-900 font-bold">{jsTime?.toFixed(4)}</span> ms</p>
-            </div>
-          )}
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center justify-center gap-3">
+            Next.js + Rust (WASM) Template
+            <a
+              href="https://github.com/emirufak/next-rust-basic"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-3 py-1 bg-gray-800 text-white text-sm rounded-full hover:bg-gray-700 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </h1>
+          <p className="text-gray-500">
+            SharedArrayBuffer • Web Workers • Zero-Copy Transfer
+          </p>
         </div>
 
-        {/* Batch Benchmark */}
-        <div className="p-6 border border-gray-200 rounded-xl bg-white shadow-sm">
-          <h2 className="text-xl font-bold mb-4 text-slate-600">Batch Benchmark</h2>
-          <div className="flex items-center gap-2 mb-4">
-            <label className="text-sm text-gray-600">Iterations:</label>
-            <input
-              type="number"
-              min={1}
-              value={batchIterations}
-              onChange={(e) => setBatchIterations(Number(e.target.value))}
-              className="p-2 border rounded text-black w-32"
-            />
-          </div>
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={runJsBatch}
-              className="px-4 py-2 bg-slate-500 hover:bg-slate-600 rounded text-white transition-colors shadow-sm"
-            >
-              Run JS Batch
-            </button>
-            <button
-              onClick={runRustBatch}
-              disabled={!isWorkerReady}
-              className="px-4 py-2 bg-slate-700 hover:bg-slate-800 rounded text-white disabled:opacity-50 transition-colors shadow-sm"
-            >
-              {isWorkerReady ? 'Run WASM Batch' : 'Loading Worker...'}
-            </button>
-          </div>
-          {(batchJsTime !== null || batchWasmTime !== null) && (
-            <div className="space-y-2 mt-4">
-              {batchResult !== null && (
-                <p className="text-lg text-gray-800">
-                  Result: <span className="font-mono font-bold">{batchResult}</span>
-                </p>
-              )}
-              {batchJsTime !== null && (
-                <p className="text-sm text-gray-500">
-                  JS Time: <span className="text-gray-900 font-bold">{batchJsTime.toFixed(4)}</span> ms
-                </p>
-              )}
-              {batchWasmTime !== null && (
-                <p className="text-sm text-gray-500">
-                  WASM Time: <span className="text-gray-900 font-bold">{batchWasmTime.toFixed(4)}</span> ms
-                </p>
-              )}
-            </div>
-          )}
+        {/* Status */}
+        <div className="flex justify-center gap-4 mb-6 text-sm">
+          <span className="flex items-center gap-1">
+            Workers: <span className="font-bold">{poolSize}</span>
+          </span>
+          <span className="flex items-center gap-1" suppressHydrationWarning>
+            SAB: {crossOriginIsolated ? '✓' : '✗'}
+          </span>
         </div>
 
-        {/* Streaming Sum Section */}
-        <div className="p-6 border border-gray-200 rounded-xl bg-white shadow-sm">
-          <h2 className="text-xl font-bold mb-4 text-cyan-600">Streaming Sum (Chunks)</h2>
-          <div className="flex flex-col gap-3 mb-4">
-            <label className="text-sm text-gray-600">
-              Total size
+        {/* Cards Grid - Fixed height cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          {/* Fibonacci Benchmark - Fixed Height */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
+            <h2 className="text-xl font-bold text-blue-600 mb-1 flex items-center gap-2">
+              <span className="text-2xl">🔢</span> Fibonacci Benchmark
+            </h2>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="text-sm text-gray-500">N value</label>
+                <input
+                  type="number"
+                  value={fibN}
+                  onChange={(e) => setFibN(Number(e.target.value))}
+                  className="w-full p-2 border rounded-lg bg-gray-50 text-gray-800"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-500">Iterations</label>
+                <input
+                  type="number"
+                  value={fibIterations}
+                  onChange={(e) => setFibIterations(Number(e.target.value))}
+                  className="w-full p-2 border rounded-lg bg-gray-50 text-gray-800"
+                />
+              </div>
+            </div>
+            <button
+              onClick={runFibonacciComparison}
+              disabled={!isWorkerReady || fibLoading}
+              className="w-full py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 disabled:opacity-50 transition-all mb-4"
+            >
+              {fibLoading ? '⏳ Running...' : '⚡ Run Comparison'}
+            </button>
+            {/* Fixed Result Area */}
+            <div className="flex-1 flex flex-col justify-center">
+              <div className="grid grid-cols-2 gap-4 mb-2">
+                <div className="bg-yellow-50 p-3 rounded-lg text-center">
+                  <div className="text-sm text-yellow-700 font-medium">JavaScript</div>
+                  <div className="text-xl font-bold text-yellow-600">{fibJsResult ?? '-'}</div>
+                  <div className="text-sm text-yellow-600">{fibJsTime?.toFixed(1) ?? '-'} ms</div>
+                </div>
+                <div className="bg-orange-50 p-3 rounded-lg text-center">
+                  <div className="text-sm text-orange-700 font-medium">Rust (WASM)</div>
+                  <div className="text-xl font-bold text-orange-600">{fibWasmResult ?? '-'}</div>
+                  <div className="text-sm text-orange-600">{fibWasmTime?.toFixed(1) ?? '-'} ms</div>
+                </div>
+              </div>
+              <div className="text-center text-green-600 font-medium h-6">
+                {fibSpeedup && fibSpeedup > 1 ? `🚀 WASM is ${fibSpeedup.toFixed(1)}x faster!` : ''}
+              </div>
+            </div>
+          </div>
+
+          {/* Matrix Multiplication - Fixed Height */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
+            <h2 className="text-xl font-bold text-red-500 mb-1 flex items-center gap-2">
+              <span className="text-2xl">🧮</span> Matrix Multiplication
+            </h2>
+            <p className="text-sm text-gray-500 mb-3">O(n³) complexity - great for showing WASM advantage</p>
+            <div className="mb-4">
+              <label className="text-sm text-gray-500">Matrix Size (n×n) - max {MAX_MATRIX_SIZE}</label>
               <input
                 type="number"
-                min={1}
-                value={streamSize}
-                onChange={(e) => setStreamSize(Number(e.target.value))}
-                className="ml-2 p-2 border rounded text-black w-32"
+                value={matrixSize}
+                max={MAX_MATRIX_SIZE}
+                onChange={(e) => setMatrixSize(Math.min(Number(e.target.value), MAX_MATRIX_SIZE))}
+                className="w-full p-2 border rounded-lg bg-gray-50 text-gray-800"
               />
-            </label>
-            <label className="text-sm text-gray-600">
-              Chunk size
+            </div>
+            <button
+              onClick={runMatrixComparison}
+              disabled={!isWorkerReady || matrixLoading || !crossOriginIsolated}
+              className="w-full py-3 bg-gradient-to-r from-red-500 to-orange-500 text-white rounded-lg font-medium hover:from-red-600 hover:to-orange-600 disabled:opacity-50 transition-all mb-4"
+            >
+              {matrixLoading ? '⏳ Running...' : '⚡ Run Comparison'}
+            </button>
+            {/* Fixed Result Area */}
+            <div className="flex-1 flex flex-col justify-center">
+              <div className="grid grid-cols-2 gap-4 mb-2">
+                <div className="bg-yellow-50 p-3 rounded-lg text-center">
+                  <div className="text-sm text-yellow-700 font-medium">JavaScript</div>
+                  <div className="text-xl font-bold text-yellow-600">{matrixJsTime?.toFixed(1) ?? '-'} <span className="text-sm">ms</span></div>
+                </div>
+                <div className="bg-orange-50 p-3 rounded-lg text-center">
+                  <div className="text-sm text-orange-700 font-medium">Rust (WASM)</div>
+                  <div className="text-xl font-bold text-orange-600">{matrixWasmTime?.toFixed(1) ?? '-'} <span className="text-sm">ms</span></div>
+                </div>
+              </div>
+              <div className="text-center text-green-600 font-medium h-6">
+                {matrixSpeedup && matrixSpeedup > 1 ? `🚀 WASM is ${matrixSpeedup.toFixed(1)}x faster!` : ''}
+              </div>
+            </div>
+          </div>
+
+          {/* Array Sorting - Fixed Height */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
+            <h2 className="text-xl font-bold text-purple-600 mb-1 flex items-center gap-2">
+              <span className="text-2xl">📊</span> Array Sorting (Quicksort)
+            </h2>
+            <p className="text-sm text-gray-500 mb-3">Sort large arrays of random numbers</p>
+            <div className="mb-4">
+              <label className="text-sm text-gray-500">Array Size - max {(MAX_ARRAY_SIZE / 1_000_000).toFixed(0)}M</label>
               <input
                 type="number"
-                min={1}
-                value={streamChunkSize}
-                onChange={(e) => setStreamChunkSize(Number(e.target.value))}
-                className="ml-2 p-2 border rounded text-black w-32"
+                value={sortSize}
+                max={MAX_ARRAY_SIZE}
+                onChange={(e) => setSortSize(Math.min(Number(e.target.value), MAX_ARRAY_SIZE))}
+                className="w-full p-2 border rounded-lg bg-gray-50 text-gray-800"
               />
-            </label>
+            </div>
+            <button
+              onClick={runSortComparison}
+              disabled={!isWorkerReady || sortLoading || !crossOriginIsolated}
+              className="w-full py-3 bg-gradient-to-r from-yellow-400 to-orange-500 text-white rounded-lg font-medium hover:from-yellow-500 hover:to-orange-600 disabled:opacity-50 transition-all mb-4"
+            >
+              {sortLoading ? '⏳ Running...' : '⚡ Run Comparison'}
+            </button>
+            {/* Fixed Result Area */}
+            <div className="flex-1 flex flex-col justify-center">
+              <div className="grid grid-cols-2 gap-4 mb-2">
+                <div className="bg-yellow-50 p-3 rounded-lg text-center">
+                  <div className="text-sm text-yellow-700 font-medium">JavaScript</div>
+                  <div className="text-xl font-bold text-yellow-600">{sortJsTime?.toFixed(1) ?? '-'} <span className="text-sm">ms</span></div>
+                </div>
+                <div className="bg-orange-50 p-3 rounded-lg text-center">
+                  <div className="text-sm text-orange-700 font-medium">Rust (WASM)</div>
+                  <div className="text-xl font-bold text-orange-600">{sortWasmTime?.toFixed(1) ?? '-'} <span className="text-sm">ms</span></div>
+                </div>
+              </div>
+              <div className="text-center text-green-600 font-medium h-6">
+                {sortSpeedup && sortSpeedup > 1 ? `🚀 WASM is ${sortSpeedup.toFixed(1)}x faster!` : ''}
+              </div>
+            </div>
           </div>
-          <button
-            onClick={runStreamedSum}
-            disabled={!isWorkerReady}
-            className="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 rounded text-white mb-4 disabled:opacity-50 transition-colors shadow-sm"
-          >
-            {isWorkerReady ? 'Run Streaming Sum' : 'Loading Worker...'}
-          </button>
-          {streamSum !== null && (
-            <div className="space-y-2">
-              <p className="text-lg text-gray-800">
-                Result: <span className="font-mono font-bold">{streamSum}</span>
-              </p>
-              <p className="text-sm text-gray-500">
-                Time: <span className="text-gray-900 font-bold">{streamTime?.toFixed(4)}</span> ms
-              </p>
-            </div>
-          )}
-        </div>
 
-        {/* Vector Sum Section */}
-        <div className="p-6 border border-gray-200 rounded-xl bg-white shadow-sm">
-          <h2 className="text-xl font-bold mb-4 text-emerald-600">Vector Sum (WASM Worker)</h2>
-          <div className="flex items-center gap-2 mb-4">
-            <label className="text-sm text-gray-600">Size:</label>
-            <input
-              type="number"
-              min={1}
-              value={sumSize}
-              onChange={(e) => setSumSize(Number(e.target.value))}
-              className="p-2 border rounded text-black w-32"
-            />
-          </div>
-          <button
-            onClick={runSumArray}
-            disabled={!isWorkerReady}
-            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 rounded text-white mb-4 disabled:opacity-50 transition-colors shadow-sm"
-          >
-            {isWorkerReady ? 'Run Sum' : 'Loading Worker...'}
-          </button>
-          {sumResult !== null && (
-            <div className="space-y-2">
-              <p className="text-lg text-gray-800">
-                Result: <span className="font-mono font-bold">{sumResult}</span>
-              </p>
-              <p className="text-sm text-gray-500">
-                Time: <span className="text-gray-900 font-bold">{sumTime?.toFixed(4)}</span> ms
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Rust Section */}
-        <div className="p-6 border border-gray-200 rounded-xl bg-white shadow-sm">
-          <h2 className="text-xl font-bold mb-4 text-orange-600">Rust (Web Worker)</h2>
-          <button 
-            onClick={runRust}
-            disabled={!isWorkerReady}
-            className="px-4 py-2 bg-orange-500 hover:bg-orange-600 rounded text-white mb-4 disabled:opacity-50 transition-colors shadow-sm"
-          >
-            {isWorkerReady ? 'Run Rust Calculation' : 'Loading Worker...'}
-          </button>
-          {rustResult !== null && (
-            <div className="space-y-2">
-              <p className="text-lg text-gray-800">Result: <span className="font-mono font-bold">{rustResult}</span></p>
-              <p className="text-sm text-gray-500">Time: <span className="text-gray-900 font-bold">{rustTime?.toFixed(4)}</span> ms</p>
-            </div>
-          )}
-        </div>
-
-        {/* Shared Buffer Section */}
-        <div className="p-6 border border-gray-200 rounded-xl bg-white shadow-sm">
-          <h2 className="text-xl font-bold mb-4 text-purple-600">Shared Memory</h2>
-          <p className="text-sm text-gray-600 mb-4">Process 1000 items in-place using SharedArrayBuffer (Zero-Copy)</p>
-          {showSabWarning && (
-            <p className="text-xs text-red-500 mb-2">
-              SharedArrayBuffer requires COOP/COEP headers. Update production headers to enable it.
+          {/* SharedArrayBuffer Demo - Fixed Height */}
+          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
+            <h2 className="text-xl font-bold text-teal-600 mb-1 flex items-center gap-2">
+              <span className="text-2xl">🔗</span> SharedArrayBuffer Demo
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              1000 × fibonacci(20) with zero-copy transfer & Atomics synchronization
             </p>
-          )}
-          <button 
-            onClick={runSharedBuffer}
-            disabled={!isWorkerReady}
-            className="px-4 py-2 bg-purple-500 hover:bg-purple-600 rounded text-white mb-4 disabled:opacity-50 transition-colors shadow-sm"
-          >
-            Run Batch Process
-          </button>
-          {sharedBufferTime !== null && (
-            <div className="space-y-2">
-              <p className="text-lg text-gray-800">Status: <span className="font-bold text-green-600">Done</span></p>
-              <p className="text-sm text-gray-500">Time: <span className="text-gray-900 font-bold">{sharedBufferTime?.toFixed(4)}</span> ms</p>
+            <button
+              onClick={runSharedBufferDemo}
+              disabled={!isWorkerReady || sabLoading || !crossOriginIsolated}
+              className="w-full py-3 bg-gradient-to-r from-orange-400 to-red-500 text-white rounded-lg font-medium hover:from-orange-500 hover:to-red-600 disabled:opacity-50 transition-all mb-4"
+            >
+              {sabLoading ? '⏳ Running...' : '🔥 Run Batch'}
+            </button>
+            {/* Fixed Result Area */}
+            <div className="flex-1 flex items-center justify-center">
+              <div className="bg-green-50 rounded-lg p-6 text-center w-full">
+                {sabCompleted ? (
+                  <>
+                    <div className="text-green-600 font-medium mb-2">✓ Completed</div>
+                    <div className="text-4xl font-bold text-green-700">{sabTime?.toFixed(1)} <span className="text-lg">ms</span></div>
+                  </>
+                ) : (
+                  <div className="text-gray-400 py-4">Run benchmark to see results</div>
+                )}
+              </div>
             </div>
-          )}
+          </div>
         </div>
+
+        {/* Error Display */}
+        {workerError && (
+          <div className="mt-6 p-4 bg-red-50 text-red-600 rounded-lg text-center">
+            ⚠️ {workerError}
+          </div>
+        )}
       </div>
-
-      {workerError && (
-        <p className="text-sm text-red-600">Worker error: {workerError}</p>
-      )}
-
     </div>
   );
 }

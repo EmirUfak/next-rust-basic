@@ -37,7 +37,17 @@ run('wasm-bindgen', [
   wasmPath,
 ]);
 
-const hasWasmOpt = spawnSync('wasm-opt', ['--version'], { stdio: 'ignore', shell: true }).status === 0;
+// Use npx to run wasm-opt from node_modules/.bin or system PATH
+const hasWasmOpt = spawnSync('npx', ['wasm-opt', '--version'], { stdio: 'ignore', shell: true }).status === 0;
 if (hasWasmOpt) {
-  run('wasm-opt', ['-O', '-o', join(outDir, 'wasm_lib_bg.wasm'), join(outDir, 'wasm_lib_bg.wasm')]);
+  const wasmFile = join(outDir, 'wasm_lib_bg.wasm');
+  const { statSync } = await import('node:fs');
+  const sizeBefore = statSync(wasmFile).size;
+  run('npx', ['wasm-opt', '-O3', '-o', wasmFile, wasmFile]);
+  const sizeAfter = statSync(wasmFile).size;
+  const reduction = ((sizeBefore - sizeAfter) / sizeBefore * 100).toFixed(1);
+  console.log(`[wasm-opt] ${(sizeBefore / 1024).toFixed(1)}KB → ${(sizeAfter / 1024).toFixed(1)}KB (${reduction}% smaller)`);
+} else {
+  console.log('[wasm] wasm-opt not found, skipping optimization');
 }
+

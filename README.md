@@ -16,10 +16,18 @@ Next.js 16, React 19 ve Rust (WebAssembly) ile yüksek performanslı web uygulam
 - **Performans Analizi:** `@next/bundle-analyzer` önceden yapılandırılmış.
 - **Tailwind CSS:** Tailwind v4 ile modern stillendirme.
 
+## Performans Teknolojileri
+
+- **SIMD-Style Operations:** 4-way loop unrolling ile paralel hesaplama
+- **Strassen Algorithm:** Büyük matrisler için O(n^2.807) karmaşıklık
+- **wasm-opt O3:** Binaryen ile maksimum optimizasyon (%22 küçülme)
+- **Atomics:** SharedArrayBuffer senkronizasyonu için donanım seviyesi kilitleme
+- **Enhanced Build:** LTO, single codegen unit ve panic=abort ile küçük binary
+
 ## Demo Özellikleri
 
-- **Fibonacci Benchmark:** JS vs WASM karşılaştırması (worker thread'de)
-- **Matrix Multiplication:** O(n³) karmaşıklık, 2×2 - 2048×2048 matris boyutu
+- **Fibonacci Benchmark:** Recursive vs Iterative, JS vs WASM karşılaştırması
+- **Matrix Multiplication:** Naive O(n³) vs Strassen O(n^2.807)
 - **Array Sorting (Quicksort):** 1K - 10M element, JS vs WASM karşılaştırması
 - **SharedArrayBuffer Demo:** Atomics senkronizasyonu ile toplu fibonacci işleme
 
@@ -145,10 +153,18 @@ A production-ready template for building high-performance web applications with 
 - **Performance Analysis:** `@next/bundle-analyzer` pre-configured.
 - **Tailwind CSS:** Modern styling with Tailwind v4.
 
+## Performance Technologies
+
+- **SIMD-Style Operations:** 4-way loop unrolling for parallel accumulation
+- **Strassen Algorithm:** O(n^2.807) matrix multiplication for large matrices
+- **wasm-opt O3:** Maximum optimization via binaryen npm package (22% size reduction)
+- **Atomics:** Hardware-level synchronization for SharedArrayBuffer
+- **Enhanced Build:** LTO, single codegen unit, and panic=abort for smaller binary
+
 ## Demo Features
 
-- **Fibonacci Benchmark:** JS vs WASM comparison (runs in worker thread)
-- **Matrix Multiplication:** O(n³) complexity, 2×2 - 2048×2048 matrix sizes
+- **Fibonacci Benchmark:** Recursive vs Iterative, JS vs WASM comparison
+- **Matrix Multiplication:** Naive O(n³) vs Strassen O(n^2.807)
 - **Array Sorting (Quicksort):** 1K - 10M elements, JS vs WASM comparison
 - **SharedArrayBuffer Demo:** Batch fibonacci processing with Atomics synchronization
 
@@ -255,14 +271,20 @@ npx create-next-app -e https://github.com/emirufak/next-rust-basic your-project-
 
 ### WASM Functions Available
 
-| Function                           | Description                          |
-| ---------------------------------- | ------------------------------------ |
-| `fibonacci(n)`                     | Recursive fibonacci calculation      |
-| `sum_u32(arr)`                     | Sum of u32 array                     |
-| `grayscale(data)`                  | Convert RGBA to grayscale (in-place) |
-| `box_blur(data, w, h, r)`          | Apply box blur filter (in-place)     |
-| `fft_demo(input, output)`          | Compute DFT magnitude spectrum       |
-| `generate_signal(out, f1, f2, f3)` | Generate test signal                 |
+| Function                               | Description                          |
+| -------------------------------------- | ------------------------------------ |
+| `fibonacci(n)`                         | Recursive fibonacci - O(2^n)         |
+| `fibonacci_iter(n)`                    | Iterative fibonacci - O(n)           |
+| `sum_u32(arr)`                         | Sum of u32 array                     |
+| `sum_f32_simd(arr)`                    | SIMD-style sum with 4-way unrolling  |
+| `dot_product_simd(a, b)`               | SIMD-style dot product               |
+| `matrix_multiply(a, b, c, n)`          | Naive matrix multiplication - O(n³)  |
+| `matrix_multiply_strassen(a, b, c, n)` | Strassen algorithm - O(n^2.807)      |
+| `quicksort(arr)`                       | In-place quicksort                   |
+| `grayscale(data)`                      | Convert RGBA to grayscale (in-place) |
+| `box_blur(data, w, h, r)`              | Apply box blur filter (in-place)     |
+| `fft_demo(input, output)`              | Compute DFT magnitude spectrum       |
+| `generate_signal(out, f1, f2, f3)`     | Generate test signal                 |
 
 ## License
 
