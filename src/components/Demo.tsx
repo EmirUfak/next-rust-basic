@@ -3,17 +3,18 @@
 import { useSyncExternalStore, useEffect, useMemo, useRef, useState } from 'react';
 import {
   MAX_BUFFER_LENGTH,
+  MAX_MATRIX_SIZE,
   WORKER_PROTOCOL_VERSION,
   type WorkerRequest,
 } from '../workers/worker-messages';
 import { WorkerPool } from '../workers/worker-pool';
 
 // Constants
-const MAX_MATRIX_SIZE = 1500;
-const MAX_ARRAY_SIZE = 15_000_000;
+const MAX_SORT_LENGTH = MAX_BUFFER_LENGTH;
 
 export default function Demo() {
   const [isWorkerReady, setIsWorkerReady] = useState(false);
+  const [isWarmupDone, setIsWarmupDone] = useState(false);
   const [workerError, setWorkerError] = useState<string | null>(null);
   const crossOriginIsolated = useSyncExternalStore(
     () => () => {},
@@ -21,18 +22,19 @@ export default function Demo() {
     () => false
   );
   const poolRef = useRef<WorkerPool | null>(null);
+  const matrixWarmupKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Debug info
     if (typeof window !== 'undefined') {
-       console.log('SAB Support:', {
-         crossOriginIsolated: window.crossOriginIsolated,
-         isSecureContext: window.isSecureContext,
-         origin: window.location.origin
-       });
+      console.log('SAB Support:', {
+        crossOriginIsolated: window.crossOriginIsolated,
+        isSecureContext: window.isSecureContext,
+        origin: window.location.origin
+      });
     }
   }, []);
-  
+
   // Fibonacci State
   const [fibN, setFibN] = useState(35);
   const [fibIterations, setFibIterations] = useState(50);
@@ -41,24 +43,27 @@ export default function Demo() {
   const [fibJsResult, setFibJsResult] = useState<number | null>(null);
   const [fibWasmResult, setFibWasmResult] = useState<number | null>(null);
   const [fibLoading, setFibLoading] = useState(false);
-  
+
   // Matrix State
   const [matrixSize, setMatrixSize] = useState(300);
+  const [matrixAlgorithm, setMatrixAlgorithm] = useState<'naive' | 'strassen'>('naive');
   const [matrixJsTime, setMatrixJsTime] = useState<number | null>(null);
   const [matrixWasmTime, setMatrixWasmTime] = useState<number | null>(null);
+  const [matrixWasmAlgorithmUsed, setMatrixWasmAlgorithmUsed] = useState<'naive' | 'strassen' | null>(null);
   const [matrixLoading, setMatrixLoading] = useState(false);
-  
+
   // Quicksort State
-  const [sortSize, setSortSize] = useState(10_000_000);
+  const [sortSize, setSortSize] = useState(Math.min(1_000_000, MAX_SORT_LENGTH));
   const [sortJsTime, setSortJsTime] = useState<number | null>(null);
   const [sortWasmTime, setSortWasmTime] = useState<number | null>(null);
   const [sortLoading, setSortLoading] = useState(false);
-  
+
   // SharedArrayBuffer State
-  const [sabTime, setSabTime] = useState<number | null>(null);
+  const [sabComputeTime, setSabComputeTime] = useState<number | null>(null);
+  const [sabRoundTripTime, setSabRoundTripTime] = useState<number | null>(null);
   const [sabLoading, setSabLoading] = useState(false);
   const [sabCompleted, setSabCompleted] = useState(false);
-  
+
   const poolSize = useMemo(() => {
     if (typeof navigator === 'undefined') return 1;
     return Math.max(1, Math.min(4, navigator.hardwareConcurrency ?? 2));
@@ -71,8 +76,6 @@ export default function Demo() {
     return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   };
 
-
-
   useEffect(() => {
     const pool = new WorkerPool(poolSize);
     poolRef.current = pool;
@@ -81,14 +84,21 @@ export default function Demo() {
       .init(() => new Worker(new URL('../workers/wasm.worker.ts', import.meta.url), { type: 'module' }))
       .then(() => {
         setIsWorkerReady(true);
-        // Trigger JIT Warmup for all workers
-        for (let i = 0; i < poolSize; i++) {
+        const warmups = Array.from({ length: poolSize }, (_, index) =>
           pool.request({
             type: 'warmup',
-            requestId: `warmup-${i}`,
+            requestId: `warmup-${index}-${createRequestId()}`,
             version: WORKER_PROTOCOL_VERSION,
-          }).catch(e => console.warn('Warmup failed', e));
+          })
+        );
+        return Promise.allSettled(warmups);
+      })
+      .then((results) => {
+        const failures = results.filter((result) => result.status === 'rejected');
+        if (failures.length > 0) {
+          console.warn('Warmup failed', failures);
         }
+        setIsWarmupDone(true);
       })
       .catch((error) => {
         setWorkerError(error instanceof Error ? error.message : 'Worker init error');
@@ -106,6 +116,22 @@ export default function Demo() {
     }
     return pool.request(request);
   };
+
+  const waitForAtomics = async (control: Int32Array) => {
+    const waitAsync = (Atomics as {
+      waitAsync?: (array: Int32Array, index: number, value: number) => { value?: Promise<unknown> } | Promise<unknown>;
+    }).waitAsync;
+    if (!waitAsync) return;
+    try {
+      const result = waitAsync(control, 0, 0);
+      const promise = (result as { value?: Promise<unknown> }).value ?? result;
+      await promise;
+    } catch {
+      // Ignore Atomics wait failures; postMessage still governs completion.
+    }
+  };
+
+  const isBenchmarkReady = isWorkerReady && isWarmupDone;
 
   // ========== FIBONACCI (JS runs in worker too) ==========
   const runFibonacciComparison = async () => {
@@ -155,57 +181,52 @@ export default function Demo() {
     if (!poolRef.current) return;
     setMatrixLoading(true);
     setWorkerError(null);
+    setMatrixWasmAlgorithmUsed(null);
 
     const n = Math.min(matrixSize, MAX_MATRIX_SIZE);
-    const size = n * n;
-    
-    const aBuffer = new SharedArrayBuffer(size * 8);
-    const bBuffer = new SharedArrayBuffer(size * 8);
-    const cBuffer = new SharedArrayBuffer(size * 8);
-    const controlBuffer = new SharedArrayBuffer(4);
-    
-    const a = new Float64Array(aBuffer);
-    const b = new Float64Array(bBuffer);
-    const control = new Int32Array(controlBuffer);
-    
-    // Initialize matrices
-    for (let i = 0; i < size; i++) {
-      a[i] = Math.random();
-      b[i] = Math.random();
-    }
+    const warmupKey = `${n}-${matrixAlgorithm}`;
 
     try {
-      // Run JS in worker
-      Atomics.store(control, 0, 0);
-      const jsStart = performance.now();
-      await postRequest({
-        type: 'matrixMultiplyJs',
-        requestId: createRequestId(),
-        version: WORKER_PROTOCOL_VERSION,
-        aBuffer,
-        bBuffer,
-        cBuffer,
-        control: controlBuffer,
-        n,
-      });
-      const jsEnd = performance.now();
-      setMatrixJsTime(jsEnd - jsStart);
+      if (matrixWarmupKeyRef.current !== warmupKey) {
+        for (let i = 0; i < 2; i++) {
+          await postRequest({
+            type: 'matrixMultiplyJsBench',
+            requestId: createRequestId(),
+            version: WORKER_PROTOCOL_VERSION,
+            n,
+          });
+          await postRequest({
+            type: 'matrixMultiplyWasmBench',
+            requestId: createRequestId(),
+            version: WORKER_PROTOCOL_VERSION,
+            n,
+            algorithm: matrixAlgorithm,
+          });
+        }
+        matrixWarmupKeyRef.current = warmupKey;
+      }
 
-      // Run WASM in worker
-      Atomics.store(control, 0, 0);
-      const wasmStart = performance.now();
-      await postRequest({
-        type: 'matrixMultiply',
+      const jsMessage = await postRequest({
+        type: 'matrixMultiplyJsBench',
         requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
-        aBuffer,
-        bBuffer,
-        cBuffer,
-        control: controlBuffer,
         n,
       });
-      const wasmEnd = performance.now();
-      setMatrixWasmTime(wasmEnd - wasmStart);
+      if (jsMessage.type === 'matrixMultiplyJsBenchDone') {
+        setMatrixJsTime(jsMessage.durationMs);
+      }
+
+      const wasmMessage = await postRequest({
+        type: 'matrixMultiplyWasmBench',
+        requestId: createRequestId(),
+        version: WORKER_PROTOCOL_VERSION,
+        n,
+        algorithm: matrixAlgorithm,
+      });
+      if (wasmMessage.type === 'matrixMultiplyWasmBenchDone') {
+        setMatrixWasmTime(wasmMessage.durationMs);
+        setMatrixWasmAlgorithmUsed(wasmMessage.algorithmUsed);
+      }
     } catch (error) {
       setWorkerError(error instanceof Error ? error.message : 'Worker error');
     }
@@ -218,50 +239,28 @@ export default function Demo() {
     setSortLoading(true);
     setWorkerError(null);
 
-    const length = Math.min(sortSize, Math.min(MAX_ARRAY_SIZE, MAX_BUFFER_LENGTH));
-    const buffer = new SharedArrayBuffer(length * 8);
-    const controlBuffer = new SharedArrayBuffer(4);
-    const arr = new Float64Array(buffer);
-    const control = new Int32Array(controlBuffer);
-
-    // Initialize with random data
-    for (let i = 0; i < length; i++) {
-      arr[i] = Math.random();
-    }
+    const length = Math.min(sortSize, MAX_SORT_LENGTH);
 
     try {
-      // Run JS in worker
-      Atomics.store(control, 0, 0);
-      const jsStart = performance.now();
-      await postRequest({
-        type: 'quicksortJs',
+      const jsMessage = await postRequest({
+        type: 'quicksortJsBench',
         requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
-        buffer,
-        control: controlBuffer,
         length,
       });
-      const jsEnd = performance.now();
-      setSortJsTime(jsEnd - jsStart);
-
-      // Re-shuffle for WASM test
-      for (let i = 0; i < length; i++) {
-        arr[i] = Math.random();
+      if (jsMessage.type === 'quicksortJsBenchDone') {
+        setSortJsTime(jsMessage.durationMs);
       }
 
-      // Run WASM in worker
-      Atomics.store(control, 0, 0);
-      const wasmStart = performance.now();
-      await postRequest({
-        type: 'quicksort',
+      const wasmMessage = await postRequest({
+        type: 'quicksortWasmBench',
         requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
-        buffer,
-        control: controlBuffer,
         length,
       });
-      const wasmEnd = performance.now();
-      setSortWasmTime(wasmEnd - wasmStart);
+      if (wasmMessage.type === 'quicksortWasmBenchDone') {
+        setSortWasmTime(wasmMessage.durationMs);
+      }
     } catch (error) {
       setWorkerError(error instanceof Error ? error.message : 'Worker error');
     }
@@ -273,6 +272,8 @@ export default function Demo() {
     if (!poolRef.current) return;
     setSabLoading(true);
     setSabCompleted(false);
+    setSabComputeTime(null);
+    setSabRoundTripTime(null);
     setWorkerError(null);
 
     if (!crossOriginIsolated) {
@@ -282,20 +283,20 @@ export default function Demo() {
     }
 
     try {
-      const length = 1000;
+      const length = 100000;
       const sab = new SharedArrayBuffer(length * 4);
       const controlBuffer = new SharedArrayBuffer(4);
       const control = new Int32Array(controlBuffer);
       const arr = new Uint32Array(sab);
 
       for (let i = 0; i < length; i++) {
-        arr[i] = 20;
+        arr[i] = 35;
       }
 
       Atomics.store(control, 0, 0);
       const start = performance.now();
-      
-      await postRequest({
+
+      const responsePromise = postRequest({
         type: 'sharedBufferProcess',
         requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
@@ -303,9 +304,16 @@ export default function Demo() {
         control: controlBuffer,
         length,
       });
+      const waitPromise = waitForAtomics(control);
 
+      const response = await responsePromise;
+      await waitPromise;
       const end = performance.now();
-      setSabTime(end - start);
+
+      setSabRoundTripTime(end - start);
+      if (response.type === 'sharedBufferDone') {
+        setSabComputeTime(response.durationMs);
+      }
       setSabCompleted(true);
     } catch (error) {
       setWorkerError(error instanceof Error ? error.message : 'SAB error');
@@ -321,6 +329,14 @@ export default function Demo() {
   const fibSpeedup = getSpeedup(fibJsTime, fibWasmTime);
   const matrixSpeedup = getSpeedup(matrixJsTime, matrixWasmTime);
   const sortSpeedup = getSpeedup(sortJsTime, sortWasmTime);
+  const matrixWasmLabel = (() => {
+    if (!matrixWasmAlgorithmUsed) {
+      return 'Rust (WASM)';
+    }
+    const base = matrixWasmAlgorithmUsed === 'strassen' ? 'Strassen' : 'Naive';
+    const fallback = matrixAlgorithm === 'strassen' && matrixWasmAlgorithmUsed !== 'strassen';
+    return `Rust (WASM - ${base}${fallback ? ' fallback' : ''})`;
+  })();
 
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-50 to-slate-100 p-8">
@@ -339,28 +355,29 @@ export default function Demo() {
               GitHub
             </a>
           </h1>
-          <p className="text-gray-500">
-            SharedArrayBuffer • Web Workers • Zero-Copy Transfer
-          </p>
-        </div>
-
-        {/* Status */}
-        <div className="flex justify-center gap-4 mb-6 text-sm">
-          <span className="flex items-center gap-1">
-            Workers: <span className="font-bold">{poolSize}</span>
-          </span>
-          <span className="flex items-center gap-1" suppressHydrationWarning>
-            SAB: {crossOriginIsolated ? '✓' : '✗'}
-          </span>
+          <div className="flex flex-wrap justify-center gap-4 text-gray-500 text-sm">
+            <span className="whitespace-nowrap">
+              SharedArrayBuffer | Web Workers | Zero-copy (main {'<->'} worker)
+            </span>
+            <span className="flex items-center gap-1 whitespace-nowrap">
+              Workers: <span className="font-bold text-gray-600">{poolSize}</span>
+            </span>
+            <span className="flex items-center gap-1 whitespace-nowrap" suppressHydrationWarning>
+              SAB: <span className="font-bold text-gray-600">{crossOriginIsolated ? 'Yes' : 'No'}</span>
+            </span>
+            <span className="flex items-center gap-1 whitespace-nowrap">
+              Warmup: <span className="font-bold text-gray-600">{isWarmupDone ? 'Ready' : 'Running'}</span>
+            </span>
+          </div>
         </div>
 
         {/* Cards Grid - Fixed height cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
+
           {/* Fibonacci Benchmark - Fixed Height */}
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
             <h2 className="text-xl font-bold text-blue-600 mb-1 flex items-center gap-2">
-              <span className="text-2xl">🔢</span> Fibonacci Benchmark
+              Fibonacci Benchmark
             </h2>
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
@@ -384,10 +401,10 @@ export default function Demo() {
             </div>
             <button
               onClick={runFibonacciComparison}
-              disabled={!isWorkerReady || fibLoading}
+              disabled={!isBenchmarkReady || fibLoading}
               className="w-full py-3 bg-linear-to-r from-blue-500 to-blue-600 text-white rounded-lg font-medium hover:from-blue-600 hover:to-blue-700 disabled:opacity-50 transition-all mb-4"
             >
-              {fibLoading ? '⏳ Running...' : '⚡ Run Comparison'}
+              {fibLoading ? 'Running...' : 'Run Comparison'}
             </button>
             {/* Fixed Result Area */}
             <div className="flex-1 flex flex-col justify-center">
@@ -404,7 +421,7 @@ export default function Demo() {
                 </div>
               </div>
               <div className="text-center text-green-600 font-medium h-6">
-                {fibSpeedup && fibSpeedup > 1 ? `🚀 WASM is ${fibSpeedup.toFixed(1)}x faster!` : ''}
+                {fibSpeedup && fibSpeedup > 1 ? `WASM is ${fibSpeedup.toFixed(1)}x faster.` : ''}
               </div>
             </div>
           </div>
@@ -412,25 +429,40 @@ export default function Demo() {
           {/* Matrix Multiplication - Fixed Height */}
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
             <h2 className="text-xl font-bold text-red-500 mb-1 flex items-center gap-2">
-              <span className="text-2xl">🧮</span> Matrix Multiplication
+              Matrix Multiplication
             </h2>
-            <p className="text-sm text-gray-500 mb-3">O(n³) complexity - great for showing WASM advantage</p>
-            <div className="mb-4">
-              <label className="text-sm text-gray-500">Matrix Size (n×n) - max {MAX_MATRIX_SIZE}</label>
-              <input
-                type="number"
-                value={matrixSize}
-                max={MAX_MATRIX_SIZE}
-                onChange={(e) => setMatrixSize(Math.min(Number(e.target.value), MAX_MATRIX_SIZE))}
-                className="w-full p-2 border rounded-lg bg-gray-50 text-gray-800"
-              />
+            <p className="text-sm text-gray-500 mb-3">
+              JS naive. WASM Strassen (pow2, n {'>='} 128). Warmup on first run.
+            </p>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="text-sm text-gray-500">Matrix Size (n x n) - max {MAX_MATRIX_SIZE}</label>
+                <input
+                  type="number"
+                  value={matrixSize}
+                  max={MAX_MATRIX_SIZE}
+                  onChange={(e) => setMatrixSize(Math.min(Number(e.target.value), MAX_MATRIX_SIZE))}
+                  className="w-full p-2 border rounded-lg bg-gray-50 text-gray-800"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-500">WASM Algorithm</label>
+                <select
+                  value={matrixAlgorithm}
+                  onChange={(e) => setMatrixAlgorithm(e.target.value as 'naive' | 'strassen')}
+                  className="w-full p-2 border rounded-lg bg-gray-50 text-gray-800"
+                >
+                  <option value="naive">Naive O(n^3)</option>
+                  <option value="strassen">Strassen O(n^2.807)</option>
+                </select>
+              </div>
             </div>
             <button
               onClick={runMatrixComparison}
-              disabled={!isWorkerReady || matrixLoading || !crossOriginIsolated}
+              disabled={!isBenchmarkReady || matrixLoading}
               className="w-full py-3 bg-linear-to-r from-red-500 to-orange-500 text-white rounded-lg font-medium hover:from-red-600 hover:to-orange-600 disabled:opacity-50 transition-all mb-4"
             >
-              {matrixLoading ? '⏳ Running...' : '⚡ Run Comparison'}
+              {matrixLoading ? 'Running...' : 'Run Comparison'}
             </button>
             {/* Fixed Result Area */}
             <div className="flex-1 flex flex-col justify-center">
@@ -440,12 +472,12 @@ export default function Demo() {
                   <div className="text-xl font-bold text-yellow-600">{matrixJsTime?.toFixed(1) ?? '-'} <span className="text-sm">ms</span></div>
                 </div>
                 <div className="bg-orange-50 p-3 rounded-lg text-center">
-                  <div className="text-sm text-orange-700 font-medium">Rust (WASM)</div>
+                  <div className="text-sm text-orange-700 font-medium">{matrixWasmLabel}</div>
                   <div className="text-xl font-bold text-orange-600">{matrixWasmTime?.toFixed(1) ?? '-'} <span className="text-sm">ms</span></div>
                 </div>
               </div>
               <div className="text-center text-green-600 font-medium h-6">
-                {matrixSpeedup && matrixSpeedup > 1 ? `🚀 WASM is ${matrixSpeedup.toFixed(1)}x faster!` : ''}
+                {matrixSpeedup && matrixSpeedup > 1 ? `WASM is ${matrixSpeedup.toFixed(1)}x faster.` : ''}
               </div>
             </div>
           </div>
@@ -453,25 +485,25 @@ export default function Demo() {
           {/* Array Sorting - Fixed Height */}
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
             <h2 className="text-xl font-bold text-purple-600 mb-1 flex items-center gap-2">
-              <span className="text-2xl">📊</span> Array Sorting (Quicksort)
+              Array Sorting (Quicksort)
             </h2>
             <p className="text-sm text-gray-500 mb-3">Sort large arrays of random numbers</p>
             <div className="mb-4">
-              <label className="text-sm text-gray-500">Array Size - max {(MAX_ARRAY_SIZE / 1_000_000).toFixed(0)}M</label>
+              <label className="text-sm text-gray-500">Array Size - max {(MAX_SORT_LENGTH / 1_000_000).toFixed(1)}M</label>
               <input
                 type="number"
                 value={sortSize}
-                max={MAX_ARRAY_SIZE}
-                onChange={(e) => setSortSize(Math.min(Number(e.target.value), MAX_ARRAY_SIZE))}
+                max={MAX_SORT_LENGTH}
+                onChange={(e) => setSortSize(Math.min(Number(e.target.value), MAX_SORT_LENGTH))}
                 className="w-full p-2 border rounded-lg bg-gray-50 text-gray-800"
               />
             </div>
             <button
               onClick={runSortComparison}
-              disabled={!isWorkerReady || sortLoading || !crossOriginIsolated}
+              disabled={!isBenchmarkReady || sortLoading}
               className="w-full py-3 bg-linear-to-r from-yellow-400 to-orange-500 text-white rounded-lg font-medium hover:from-yellow-500 hover:to-orange-600 disabled:opacity-50 transition-all mb-4"
             >
-              {sortLoading ? '⏳ Running...' : '⚡ Run Comparison'}
+              {sortLoading ? 'Running...' : 'Run Comparison'}
             </button>
             {/* Fixed Result Area */}
             <div className="flex-1 flex flex-col justify-center">
@@ -486,7 +518,7 @@ export default function Demo() {
                 </div>
               </div>
               <div className="text-center text-green-600 font-medium h-6">
-                {sortSpeedup && sortSpeedup > 1 ? `🚀 WASM is ${sortSpeedup.toFixed(1)}x faster!` : ''}
+                {sortSpeedup && sortSpeedup > 1 ? `WASM is ${sortSpeedup.toFixed(1)}x faster.` : ''}
               </div>
             </div>
           </div>
@@ -494,25 +526,27 @@ export default function Demo() {
           {/* SharedArrayBuffer Demo - Fixed Height */}
           <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
             <h2 className="text-xl font-bold text-teal-600 mb-1 flex items-center gap-2">
-              <span className="text-2xl">🔗</span> SharedArrayBuffer Demo
+              SharedArrayBuffer Demo
             </h2>
             <p className="text-sm text-gray-500 mb-4">
-              1000 × fibonacci(20) with zero-copy transfer & Atomics synchronization
+              100000x iter(35) • zero-copy main {'<->'} worker • Atomics sync
             </p>
             <button
               onClick={runSharedBufferDemo}
-              disabled={!isWorkerReady || sabLoading || !crossOriginIsolated}
+              disabled={!isBenchmarkReady || sabLoading || !crossOriginIsolated}
               className="w-full py-3 bg-linear-to-r from-orange-400 to-red-500 text-white rounded-lg font-medium hover:from-orange-500 hover:to-red-600 disabled:opacity-50 transition-all mb-4"
             >
-              {sabLoading ? '⏳ Running...' : '🔥 Run Batch'}
+              {sabLoading ? 'Running...' : 'Run Batch'}
             </button>
             {/* Fixed Result Area */}
             <div className="flex-1 flex items-center justify-center">
               <div className="bg-green-50 rounded-lg p-6 text-center w-full">
                 {sabCompleted ? (
                   <>
-                    <div className="text-green-600 font-medium mb-2">✓ Completed</div>
-                    <div className="text-4xl font-bold text-green-700">{sabTime?.toFixed(1)} <span className="text-lg">ms</span></div>
+                    <div className="text-green-600 font-medium mb-1">Completed</div>
+                    <div className="text-xs text-green-700 mb-1">Compute time (worker)</div>
+                    <div className="text-4xl font-bold text-green-700">{sabComputeTime?.toFixed(1) ?? '-'} <span className="text-lg">ms</span></div>
+                    <div className="text-xs text-green-700 mt-2">Round-trip: {sabRoundTripTime?.toFixed(1) ?? '-'} ms</div>
                   </>
                 ) : (
                   <div className="text-gray-400 py-4">Run benchmark to see results</div>
@@ -525,7 +559,7 @@ export default function Demo() {
         {/* Error Display */}
         {workerError && (
           <div className="mt-6 p-4 bg-red-50 text-red-600 rounded-lg text-center">
-            ⚠️ {workerError}
+            Error: {workerError}
           </div>
         )}
       </div>

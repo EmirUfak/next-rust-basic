@@ -18,6 +18,7 @@ import init, {
 import {
   isWorkerRequest,
   MAX_BUFFER_LENGTH,
+  MAX_MATRIX_SIZE,
   MAX_IMAGE_SIZE,
   WORKER_PROTOCOL_VERSION,
   type WorkerRequest,
@@ -25,6 +26,19 @@ import {
 } from './worker-messages';
 
 let isInitialized = false;
+let wasmExports: WasmExports | null = null;
+
+const STRASSEN_MIN_N = 128;
+const isPowerOfTwo = (n: number) => n > 0 && (n & (n - 1)) === 0;
+
+type WasmExports = {
+  memory: WebAssembly.Memory;
+  alloc_f64: (len: number) => number;
+  free_f64: (ptr: number, len: number) => void;
+  matrix_multiply_ptr: (aPtr: number, bPtr: number, cPtr: number, n: number) => void;
+  matrix_multiply_strassen_ptr: (aPtr: number, bPtr: number, cPtr: number, n: number) => void;
+  quicksort_ptr: (ptr: number, len: number) => void;
+};
 
 // ============================================================================
 // JS IMPLEMENTATIONS (for fair comparison - both run in worker thread)
@@ -104,6 +118,27 @@ const signalComplete = (control: Int32Array) => {
   Atomics.notify(control, 0, 1);
 };
 
+const ensureWasm = async (): Promise<WasmExports> => {
+  if (!isInitialized) {
+    const exports = await init();
+    wasmExports = exports as unknown as WasmExports;
+    isInitialized = true;
+  }
+  if (!wasmExports) {
+    throw new Error('WASM exports not available');
+  }
+  return wasmExports;
+};
+
+const allocF64View = (wasm: WasmExports, len: number) => {
+  const ptr = wasm.alloc_f64(len);
+  if (!ptr) {
+    throw new Error('WASM alloc failed');
+  }
+  const view = new Float64Array(wasm.memory.buffer, ptr, len);
+  return { ptr, view };
+};
+
 // ============================================================================
 // MESSAGE HANDLER
 // ============================================================================
@@ -123,10 +158,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
   try {
     // Streaming WASM instantiation for faster startup
-    if (!isInitialized) {
-      await init();
-      isInitialized = true;
-    }
+    await ensureWasm();
 
     switch (message.type) {
       // ========== PING ==========
@@ -148,11 +180,11 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
           // 2. Matrix Multiplication (small)
           const n = 30;
-          const a = new Float64Array(n * n).fill(1.0);
-          const b = new Float64Array(n * n).fill(1.0);
-          const c = new Float64Array(n * n);
-          matrix_multiply(a, b, c, n);
-          matrixMultiplyJS(a, b, c, n);
+          const aWarm = new Float64Array(n * n).fill(1.0);
+          const bWarm = new Float64Array(n * n).fill(1.0);
+          const cWarm = new Float64Array(n * n);
+          matrix_multiply(aWarm, bWarm, cWarm, n);
+          matrixMultiplyJS(aWarm, bWarm, cWarm, n);
 
           // 3. Quicksort
           const arr = new Float64Array(500).map(() => Math.random());
@@ -166,6 +198,32 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
             const view = new Uint32Array(sab);
             for(let i=0; i<length; i++) view[i] = 10;
             process_shared_buffer(view);
+          }
+
+          // 5. Pointer-based WASM (direct memory)
+          const wasm = await ensureWasm();
+          const size = 16;
+          const count = size * size;
+          let aPtr = null as null | { ptr: number; view: Float64Array };
+          let bPtr = null as null | { ptr: number; view: Float64Array };
+          let cPtr = null as null | { ptr: number; view: Float64Array };
+          try {
+            aPtr = allocF64View(wasm, count);
+            bPtr = allocF64View(wasm, count);
+            cPtr = allocF64View(wasm, count);
+            aPtr.view = new Float64Array(wasm.memory.buffer, aPtr.ptr, count);
+            bPtr.view = new Float64Array(wasm.memory.buffer, bPtr.ptr, count);
+            cPtr.view = new Float64Array(wasm.memory.buffer, cPtr.ptr, count);
+            for (let i = 0; i < count; i++) {
+              aPtr.view[i] = Math.random();
+              bPtr.view[i] = Math.random();
+            }
+            wasm.matrix_multiply_ptr(aPtr.ptr, bPtr.ptr, cPtr.ptr, size);
+            wasm.quicksort_ptr(cPtr.ptr, count);
+          } finally {
+            if (aPtr) wasm.free_f64(aPtr.ptr, count);
+            if (bPtr) wasm.free_f64(bPtr.ptr, count);
+            if (cPtr) wasm.free_f64(cPtr.ptr, count);
           }
         } catch (e) {
           console.warn('Warmup partial failure:', e);
@@ -250,6 +308,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       // ========== SHARED BUFFER ==========
       case 'sharedBufferProcess': {
         if (message.length > MAX_BUFFER_LENGTH) {
+          const control = new Int32Array(message.control);
+          signalComplete(control);
           postMessageSafe({
             type: 'error',
             requestId: message.requestId,
@@ -261,12 +321,15 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
         const view = new Uint32Array(message.buffer, 0, message.length);
         const control = new Int32Array(message.control);
+        const start = performance.now();
         process_shared_buffer(view);
+        const durationMs = performance.now() - start;
         signalComplete(control);
         postMessageSafe({
           type: 'sharedBufferDone',
           requestId: message.requestId,
           version: WORKER_PROTOCOL_VERSION,
+          durationMs,
         });
         break;
       }
@@ -294,6 +357,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
       case 'sumArraySab': {
         if (message.length > MAX_BUFFER_LENGTH) {
+          const control = new Int32Array(message.control);
+          signalComplete(control);
           postMessageSafe({
             type: 'error',
             requestId: message.requestId,
@@ -348,6 +413,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       // ========== IMAGE PROCESSING ==========
       case 'grayscale': {
         if (message.length > MAX_IMAGE_SIZE) {
+          const control = new Int32Array(message.control);
+          signalComplete(control);
           postMessageSafe({
             type: 'error',
             requestId: message.requestId,
@@ -371,6 +438,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       case 'boxBlur': {
         const imageSize = message.width * message.height * 4;
         if (imageSize > MAX_IMAGE_SIZE) {
+          const control = new Int32Array(message.control);
+          signalComplete(control);
           postMessageSafe({
             type: 'error',
             requestId: message.requestId,
@@ -468,6 +537,90 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         break;
       }
 
+      case 'matrixMultiplyJsBench': {
+        const n = Math.min(message.n, MAX_MATRIX_SIZE);
+        if (n <= 0) {
+          postMessageSafe({
+            type: 'error',
+            requestId: message.requestId,
+            version: WORKER_PROTOCOL_VERSION,
+            message: 'Matrix size must be greater than zero.',
+          });
+          break;
+        }
+        const size = n * n;
+        const a = new Float64Array(size);
+        const b = new Float64Array(size);
+        const c = new Float64Array(size);
+        for (let i = 0; i < size; i++) {
+          a[i] = Math.random();
+          b[i] = Math.random();
+        }
+        const start = performance.now();
+        matrixMultiplyJS(a, b, c, n);
+        const durationMs = performance.now() - start;
+        postMessageSafe({
+          type: 'matrixMultiplyJsBenchDone',
+          requestId: message.requestId,
+          version: WORKER_PROTOCOL_VERSION,
+          durationMs,
+        });
+        break;
+      }
+
+      case 'matrixMultiplyWasmBench': {
+        const n = Math.min(message.n, MAX_MATRIX_SIZE);
+        if (n <= 0) {
+          postMessageSafe({
+            type: 'error',
+            requestId: message.requestId,
+            version: WORKER_PROTOCOL_VERSION,
+            message: 'Matrix size must be greater than zero.',
+          });
+          break;
+        }
+        const wasm = await ensureWasm();
+        const size = n * n;
+        let a = null as null | { ptr: number; view: Float64Array };
+        let b = null as null | { ptr: number; view: Float64Array };
+        let c = null as null | { ptr: number; view: Float64Array };
+        try {
+          a = allocF64View(wasm, size);
+          b = allocF64View(wasm, size);
+          c = allocF64View(wasm, size);
+          a.view = new Float64Array(wasm.memory.buffer, a.ptr, size);
+          b.view = new Float64Array(wasm.memory.buffer, b.ptr, size);
+          c.view = new Float64Array(wasm.memory.buffer, c.ptr, size);
+          for (let i = 0; i < size; i++) {
+            a.view[i] = Math.random();
+            b.view[i] = Math.random();
+          }
+          const algorithmUsed =
+            message.algorithm === 'strassen' && n >= STRASSEN_MIN_N && isPowerOfTwo(n)
+              ? 'strassen'
+              : 'naive';
+          const start = performance.now();
+          if (algorithmUsed === 'strassen') {
+            wasm.matrix_multiply_strassen_ptr(a.ptr, b.ptr, c.ptr, n);
+          } else {
+            wasm.matrix_multiply_ptr(a.ptr, b.ptr, c.ptr, n);
+          }
+          const durationMs = performance.now() - start;
+          postMessageSafe({
+            type: 'matrixMultiplyWasmBenchDone',
+            requestId: message.requestId,
+            version: WORKER_PROTOCOL_VERSION,
+            durationMs,
+            algorithmUsed,
+          });
+        } finally {
+          if (a) wasm.free_f64(a.ptr, size);
+          if (b) wasm.free_f64(b.ptr, size);
+          if (c) wasm.free_f64(c.ptr, size);
+        }
+        break;
+      }
+
       // ========== SORTING ==========
       case 'quicksort': {
         const view = new Float64Array(message.buffer, 0, message.length);
@@ -492,6 +645,64 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           requestId: message.requestId,
           version: WORKER_PROTOCOL_VERSION,
         });
+        break;
+      }
+
+      case 'quicksortJsBench': {
+        if (message.length > MAX_BUFFER_LENGTH) {
+          postMessageSafe({
+            type: 'error',
+            requestId: message.requestId,
+            version: WORKER_PROTOCOL_VERSION,
+            message: `Array length exceeds limit (${MAX_BUFFER_LENGTH}).`,
+          });
+          break;
+        }
+        const arr = new Float64Array(message.length);
+        for (let i = 0; i < message.length; i++) {
+          arr[i] = Math.random();
+        }
+        const start = performance.now();
+        quicksortJS(arr);
+        const durationMs = performance.now() - start;
+        postMessageSafe({
+          type: 'quicksortJsBenchDone',
+          requestId: message.requestId,
+          version: WORKER_PROTOCOL_VERSION,
+          durationMs,
+        });
+        break;
+      }
+
+      case 'quicksortWasmBench': {
+        if (message.length > MAX_BUFFER_LENGTH) {
+          postMessageSafe({
+            type: 'error',
+            requestId: message.requestId,
+            version: WORKER_PROTOCOL_VERSION,
+            message: `Array length exceeds limit (${MAX_BUFFER_LENGTH}).`,
+          });
+          break;
+        }
+        const wasm = await ensureWasm();
+        let buffer = null as null | { ptr: number; view: Float64Array };
+        try {
+          buffer = allocF64View(wasm, message.length);
+          for (let i = 0; i < message.length; i++) {
+            buffer.view[i] = Math.random();
+          }
+          const start = performance.now();
+          wasm.quicksort_ptr(buffer.ptr, message.length);
+          const durationMs = performance.now() - start;
+          postMessageSafe({
+            type: 'quicksortWasmBenchDone',
+            requestId: message.requestId,
+            version: WORKER_PROTOCOL_VERSION,
+            durationMs,
+          });
+        } finally {
+          if (buffer) wasm.free_f64(buffer.ptr, message.length);
+        }
         break;
       }
 

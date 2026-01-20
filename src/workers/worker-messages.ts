@@ -1,6 +1,7 @@
 export const WORKER_PROTOCOL_VERSION = 1 as const;
-export const MAX_BUFFER_LENGTH = 2_000_000;
+export const MAX_BUFFER_LENGTH = 10_000_000;
 export const MAX_IMAGE_SIZE = 16_000_000; // 4K x 4K x 4 channels
+export const MAX_MATRIX_SIZE = 1500;
 
 // ============================================================================
 // REQUEST TYPES
@@ -33,9 +34,13 @@ export type WorkerRequest =
   | { type: 'matrixMultiply'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; aBuffer: SharedArrayBuffer; bBuffer: SharedArrayBuffer; cBuffer: SharedArrayBuffer; control: SharedArrayBuffer; n: number }
   | { type: 'matrixMultiplyJs'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; aBuffer: SharedArrayBuffer; bBuffer: SharedArrayBuffer; cBuffer: SharedArrayBuffer; control: SharedArrayBuffer; n: number }
   | { type: 'matrixMultiplyStrassen'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; aBuffer: SharedArrayBuffer; bBuffer: SharedArrayBuffer; cBuffer: SharedArrayBuffer; control: SharedArrayBuffer; n: number }
+  | { type: 'matrixMultiplyJsBench'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; n: number }
+  | { type: 'matrixMultiplyWasmBench'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; n: number; algorithm: 'naive' | 'strassen' }
   // Sorting
   | { type: 'quicksort'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; buffer: SharedArrayBuffer; control: SharedArrayBuffer; length: number }
-  | { type: 'quicksortJs'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; buffer: SharedArrayBuffer; control: SharedArrayBuffer; length: number };
+  | { type: 'quicksortJs'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; buffer: SharedArrayBuffer; control: SharedArrayBuffer; length: number }
+  | { type: 'quicksortJsBench'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; length: number }
+  | { type: 'quicksortWasmBench'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; length: number };
 
 // ============================================================================
 // RESPONSE TYPES
@@ -53,7 +58,7 @@ export type WorkerResponse =
   | { type: 'fibonacciBatchJsResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number; iterations: number }
   | { type: 'fibonacciIterBatchResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: bigint; iterations: number }
   // SharedArrayBuffer results
-  | { type: 'sharedBufferDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION }
+  | { type: 'sharedBufferDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; durationMs: number }
   // Array results
   | { type: 'sumArrayResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number }
   | { type: 'sumArraySabResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number }
@@ -70,9 +75,13 @@ export type WorkerResponse =
   | { type: 'matrixMultiplyDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION }
   | { type: 'matrixMultiplyJsDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION }
   | { type: 'matrixMultiplyStrassenDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION }
+  | { type: 'matrixMultiplyJsBenchDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; durationMs: number }
+  | { type: 'matrixMultiplyWasmBenchDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; durationMs: number; algorithmUsed: 'naive' | 'strassen' }
   // Sorting results
   | { type: 'quicksortDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION }
-  | { type: 'quicksortJsDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION };
+  | { type: 'quicksortJsDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION }
+  | { type: 'quicksortJsBenchDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; durationMs: number }
+  | { type: 'quicksortWasmBenchDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; durationMs: number };
 
 // ============================================================================
 // TYPE GUARDS
@@ -85,7 +94,8 @@ const validRequestTypes = new Set([
   'ping', 'warmup', 'fibonacci', 'fibonacciIter', 'fibonacciBatch', 'fibonacciBatchJs', 'fibonacciIterBatch',
   'sharedBufferProcess', 'sumArray', 'sumArraySab', 'dotProductSimd', 'sumF32Simd',
   'grayscale', 'boxBlur', 'fftDemo', 'generateSignal',
-  'matrixMultiply', 'matrixMultiplyJs', 'matrixMultiplyStrassen', 'quicksort', 'quicksortJs'
+  'matrixMultiply', 'matrixMultiplyJs', 'matrixMultiplyStrassen', 'matrixMultiplyJsBench', 'matrixMultiplyWasmBench',
+  'quicksort', 'quicksortJs', 'quicksortJsBench', 'quicksortWasmBench'
 ]);
 
 export const isWorkerRequest = (value: unknown): value is WorkerRequest => {
@@ -101,8 +111,8 @@ const validResponseTypes = new Set([
   'sharedBufferDone', 'sumArrayResult', 'sumArraySabResult',
   'dotProductSimdResult', 'sumF32SimdResult',
   'grayscaleDone', 'boxBlurDone', 'fftDemoDone', 'generateSignalDone',
-  'matrixMultiplyDone', 'matrixMultiplyJsDone', 'matrixMultiplyStrassenDone',
-  'quicksortDone', 'quicksortJsDone'
+  'matrixMultiplyDone', 'matrixMultiplyJsDone', 'matrixMultiplyStrassenDone', 'matrixMultiplyJsBenchDone', 'matrixMultiplyWasmBenchDone',
+  'quicksortDone', 'quicksortJsDone', 'quicksortJsBenchDone', 'quicksortWasmBenchDone'
 ]);
 
 export const isWorkerResponse = (value: unknown): value is WorkerResponse => {
