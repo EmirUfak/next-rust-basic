@@ -18,6 +18,9 @@ export default async function init() {
     memory: { buffer: new ArrayBuffer(0) },
     alloc_f64: stubError,
     free_f64: stubError,
+    alloc_u32: stubError,
+    free_u32: stubError,
+    process_shared_buffer_ptr: stubError,
     matrix_multiply_ptr: stubError,
     matrix_multiply_strassen_ptr: stubError,
     quicksort_ptr: stubError,
@@ -33,6 +36,10 @@ export function fibonacci_iter() {
 }
 
 export function process_shared_buffer() {
+  stubError();
+}
+
+export function process_shared_buffer_ptr() {
   stubError();
 }
 
@@ -76,6 +83,14 @@ export function matrix_multiply_strassen() {
   stubError();
 }
 
+export function set_strassen_threshold() {
+  stubError();
+}
+
+export function get_strassen_threshold() {
+  stubError();
+}
+
 export function quicksort() {
   stubError();
 }
@@ -85,6 +100,9 @@ export function quicksort() {
   memory: { buffer: ArrayBuffer };
   alloc_f64: (len: number) => number;
   free_f64: (ptr: number, len: number) => void;
+  alloc_u32: (len: number) => number;
+  free_u32: (ptr: number, len: number) => void;
+  process_shared_buffer_ptr: (ptr: number, len: number) => void;
   matrix_multiply_ptr: (aPtr: number, bPtr: number, cPtr: number, n: number) => void;
   matrix_multiply_strassen_ptr: (aPtr: number, bPtr: number, cPtr: number, n: number) => void;
   quicksort_ptr: (ptr: number, len: number) => void;
@@ -92,6 +110,7 @@ export function quicksort() {
 export function fibonacci(n: number): number;
 export function fibonacci_iter(n: number): bigint;
 export function process_shared_buffer(arr: Uint32Array): void;
+export function process_shared_buffer_ptr(ptr: number, len: number): void;
 export function sum_u32(arr: Uint32Array): number;
 export function sum_u32_sab(arr: Uint32Array): number;
 export function sum_f32_simd(arr: Float32Array): number;
@@ -102,6 +121,8 @@ export function fft_demo(input: Float64Array, output: Float64Array): void;
 export function generate_signal(buffer: Float64Array, freq1: number, freq2: number, freq3: number): void;
 export function matrix_multiply(a: Float64Array, b: Float64Array, c: Float64Array, n: number): void;
 export function matrix_multiply_strassen(a: Float64Array, b: Float64Array, c: Float64Array, n: number): void;
+export function set_strassen_threshold(value: number): void;
+export function get_strassen_threshold(): number;
 export function quicksort(arr: Float64Array): void;
 `;
 

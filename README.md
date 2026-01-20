@@ -1,5 +1,3 @@
-<img width="1214" height="901" alt="rust-readme" src="https://github.com/user-attachments/assets/1d2437e6-3928-4f80-a845-d0b8ef44123f" />
-
 # next-rust-basic Template
 
 Next.js 16, React 19 ve Rust (WebAssembly) ile yüksek performanslı web uygulamaları geliştirmek için production-ready (üretime hazır) bir şablon.
@@ -32,7 +30,7 @@ Next.js 16, React 19 ve Rust (WebAssembly) ile yüksek performanslı web uygulam
 
 - **Fibonacci Benchmark:** JS vs WASM karşılaştırması (worker içinde).
 - **Matrix Multiplication:** JS naive O(n^3) ve WASM için opsiyonel Strassen (power-of-two, n >= 128).
-- **Array Sorting (Quicksort):** 1K - 2.0M element (WASM bellek görünümü ile kopyasız).
+- **Array Sorting (Quicksort):** 1K - 50M element (WASM bellek görünümü ile kopyasız).
 - **SharedArrayBuffer Demo:** Atomics senkronizasyonu ile toplu fibonacci_iter işlemi (compute time ve round-trip ayrı gösterilir).
 
 ## Gereksinimler
@@ -204,7 +202,7 @@ A production-ready template for building high-performance web applications with 
 
 - **Fibonacci Benchmark:** JS vs WASM comparison (both in worker).
 - **Matrix Multiplication:** JS naive O(n^3) with optional Strassen in WASM (power-of-two, n >= 128).
-- **Array Sorting (Quicksort):** 1K - 2.0M elements (direct wasm memory view).
+- **Array Sorting (Quicksort):** 1K - 50M elements (direct wasm memory view).
 - **SharedArrayBuffer Demo:** Batch fibonacci_iter with Atomics sync (compute time and round-trip shown separately).
 
 ## Prerequisites

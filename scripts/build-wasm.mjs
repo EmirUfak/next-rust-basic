@@ -99,7 +99,19 @@ if (hasWasmOpt) {
   const wasmFile = join(outDir, 'wasm_lib_bg.wasm');
   const { statSync } = await import('node:fs');
   const sizeBefore = statSync(wasmFile).size;
-  run('npx', ['wasm-opt', '-O3', '-o', wasmFile, wasmFile]);
+  const wasmOptLevelEnv = (process.env.WASM_OPT_LEVEL || '').trim();
+  const wasmOptLevel = wasmOptLevelEnv
+    ? (wasmOptLevelEnv.startsWith('-O')
+      ? wasmOptLevelEnv
+      : (wasmOptLevelEnv.startsWith('O') ? `-${wasmOptLevelEnv}` : `-O${wasmOptLevelEnv}`))
+    : '-O3';
+  const fastMath = process.env.WASM_OPT_FAST_MATH === '1' || process.env.WASM_OPT_FAST_MATH === 'true';
+  const wasmOptArgs = ['wasm-opt', wasmOptLevel];
+  if (fastMath) {
+    wasmOptArgs.push('--fast-math');
+  }
+  wasmOptArgs.push('-o', wasmFile, wasmFile);
+  run('npx', wasmOptArgs);
   const sizeAfter = statSync(wasmFile).size;
   const reduction = ((sizeBefore - sizeAfter) / sizeBefore * 100).toFixed(1);
   console.log(`[wasm-opt] ${(sizeBefore / 1024).toFixed(1)}KB -> ${(sizeAfter / 1024).toFixed(1)}KB (${reduction}% smaller)`);

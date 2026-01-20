@@ -1,6 +1,6 @@
 'use client';
 
-import { useSyncExternalStore, useEffect, useMemo, useRef, useState } from 'react';
+import { useSyncExternalStore, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import {
   MAX_BUFFER_LENGTH,
   MAX_MATRIX_SIZE,
@@ -23,6 +23,9 @@ export default function Demo() {
   );
   const poolRef = useRef<WorkerPool | null>(null);
   const matrixWarmupKeyRef = useRef<string | null>(null);
+  const sortWarmupKeyRef = useRef<string | null>(null);
+  const sabPathRef = useRef<'auto' | 'wasm' | 'sab'>('auto');
+  const sabWarmupDoneRef = useRef(false);
 
   useEffect(() => {
     // Debug info
@@ -68,6 +71,9 @@ export default function Demo() {
     if (typeof navigator === 'undefined') return 1;
     return Math.max(1, Math.min(4, navigator.hardwareConcurrency ?? 2));
   }, []);
+
+  const matrixWorkerCursor = useRef(0);
+  const sortWorkerCursor = useRef(0);
 
   const createRequestId = () => {
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -115,6 +121,21 @@ export default function Demo() {
       return Promise.reject(new Error('Worker pool is not initialized'));
     }
     return pool.request(request);
+  };
+
+  const postRequestOnWorker = (index: number, request: WorkerRequest) => {
+    const pool = poolRef.current;
+    if (!pool) {
+      return Promise.reject(new Error('Worker pool is not initialized'));
+    }
+    return pool.requestOnWorker(index, request);
+  };
+
+  const pickWorkerIndex = (cursorRef: MutableRefObject<number>, limit: number) => {
+    const safeLimit = Math.max(1, Math.min(limit, poolSize));
+    const index = cursorRef.current % safeLimit;
+    cursorRef.current = (cursorRef.current + 1) % safeLimit;
+    return index;
   };
 
   const waitForAtomics = async (control: Int32Array) => {
@@ -184,18 +205,19 @@ export default function Demo() {
     setMatrixWasmAlgorithmUsed(null);
 
     const n = Math.min(matrixSize, MAX_MATRIX_SIZE);
-    const warmupKey = `${n}-${matrixAlgorithm}`;
+    const matrixWorkerIndex = pickWorkerIndex(matrixWorkerCursor, Math.min(2, poolSize));
+    const warmupKey = `${n}-${matrixAlgorithm}-w${matrixWorkerIndex}`;
 
     try {
       if (matrixWarmupKeyRef.current !== warmupKey) {
         for (let i = 0; i < 2; i++) {
-          await postRequest({
+          await postRequestOnWorker(matrixWorkerIndex, {
             type: 'matrixMultiplyJsBench',
             requestId: createRequestId(),
             version: WORKER_PROTOCOL_VERSION,
             n,
           });
-          await postRequest({
+          await postRequestOnWorker(matrixWorkerIndex, {
             type: 'matrixMultiplyWasmBench',
             requestId: createRequestId(),
             version: WORKER_PROTOCOL_VERSION,
@@ -206,7 +228,7 @@ export default function Demo() {
         matrixWarmupKeyRef.current = warmupKey;
       }
 
-      const jsMessage = await postRequest({
+      const jsMessage = await postRequestOnWorker(matrixWorkerIndex, {
         type: 'matrixMultiplyJsBench',
         requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
@@ -216,7 +238,7 @@ export default function Demo() {
         setMatrixJsTime(jsMessage.durationMs);
       }
 
-      const wasmMessage = await postRequest({
+      const wasmMessage = await postRequestOnWorker(matrixWorkerIndex, {
         type: 'matrixMultiplyWasmBench',
         requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
@@ -240,9 +262,27 @@ export default function Demo() {
     setWorkerError(null);
 
     const length = Math.min(sortSize, MAX_SORT_LENGTH);
+    const sortWorkerIndex = pickWorkerIndex(sortWorkerCursor, Math.min(4, poolSize));
+    const warmupKey = `${length}-w${sortWorkerIndex}`;
 
     try {
-      const jsMessage = await postRequest({
+      if (sortWarmupKeyRef.current !== warmupKey) {
+        await postRequestOnWorker(sortWorkerIndex, {
+          type: 'quicksortJsBench',
+          requestId: createRequestId(),
+          version: WORKER_PROTOCOL_VERSION,
+          length,
+        });
+        await postRequestOnWorker(sortWorkerIndex, {
+          type: 'quicksortWasmBench',
+          requestId: createRequestId(),
+          version: WORKER_PROTOCOL_VERSION,
+          length,
+        });
+        sortWarmupKeyRef.current = warmupKey;
+      }
+
+      const jsMessage = await postRequestOnWorker(sortWorkerIndex, {
         type: 'quicksortJsBench',
         requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
@@ -252,7 +292,7 @@ export default function Demo() {
         setSortJsTime(jsMessage.durationMs);
       }
 
-      const wasmMessage = await postRequest({
+      const wasmMessage = await postRequestOnWorker(sortWorkerIndex, {
         type: 'quicksortWasmBench',
         requestId: createRequestId(),
         version: WORKER_PROTOCOL_VERSION,
@@ -283,37 +323,162 @@ export default function Demo() {
     }
 
     try {
+      const sharedWorkerIndex = 0;
       const length = 100000;
-      const sab = new SharedArrayBuffer(length * 4);
-      const controlBuffer = new SharedArrayBuffer(4);
-      const control = new Int32Array(controlBuffer);
-      const arr = new Uint32Array(sab);
+      const iterValue = 35;
 
-      for (let i = 0; i < length; i++) {
-        arr[i] = 35;
+      const runWasmShared = async (len: number) => {
+        const sharedInit = await postRequestOnWorker(sharedWorkerIndex, {
+          type: 'sharedMemoryInit',
+          requestId: createRequestId(),
+          version: WORKER_PROTOCOL_VERSION,
+          length: len,
+        });
+
+        if (
+          sharedInit.type !== 'sharedMemoryReady' ||
+          !sharedInit.available ||
+          !sharedInit.buffer ||
+          typeof sharedInit.ptr !== 'number' ||
+          sharedInit.length !== len
+        ) {
+          return null;
+        }
+
+        const byteEnd = sharedInit.ptr + len * 4;
+        if (byteEnd > sharedInit.buffer.byteLength) {
+          return null;
+        }
+
+        const arr = new Uint32Array(sharedInit.buffer, sharedInit.ptr, len);
+        for (let i = 0; i < len; i++) {
+          arr[i] = iterValue;
+        }
+
+        const controlBuffer = new SharedArrayBuffer(4);
+        const control = new Int32Array(controlBuffer);
+        Atomics.store(control, 0, 0);
+        const start = performance.now();
+
+        const responsePromise = postRequestOnWorker(sharedWorkerIndex, {
+          type: 'sharedMemoryProcess',
+          requestId: createRequestId(),
+          version: WORKER_PROTOCOL_VERSION,
+          ptr: sharedInit.ptr,
+          length: len,
+          control: controlBuffer,
+        });
+        const waitPromise = waitForAtomics(control);
+
+        const response = await responsePromise;
+        await waitPromise;
+        const end = performance.now();
+
+        if (response.type !== 'sharedMemoryProcessDone') {
+          return null;
+        }
+
+        return {
+          computeMs: response.durationMs,
+          roundTripMs: end - start,
+        };
+      };
+
+      const runSabCopy = async (len: number) => {
+        const sab = new SharedArrayBuffer(len * 4);
+        const arr = new Uint32Array(sab);
+        for (let i = 0; i < len; i++) {
+          arr[i] = iterValue;
+        }
+
+        const controlBuffer = new SharedArrayBuffer(4);
+        const control = new Int32Array(controlBuffer);
+        Atomics.store(control, 0, 0);
+        const start = performance.now();
+
+        const responsePromise = postRequest({
+          type: 'sharedBufferProcess',
+          requestId: createRequestId(),
+          version: WORKER_PROTOCOL_VERSION,
+          buffer: sab,
+          control: controlBuffer,
+          length: len,
+        });
+        const waitPromise = waitForAtomics(control);
+
+        const response = await responsePromise;
+        await waitPromise;
+        const end = performance.now();
+
+        if (response.type !== 'sharedBufferDone') {
+          return null;
+        }
+
+        return {
+          computeMs: response.durationMs,
+          roundTripMs: end - start,
+        };
+      };
+
+      let result = null as null | { computeMs: number; roundTripMs: number };
+
+      if (sabPathRef.current === 'wasm') {
+        result = await runWasmShared(length);
+        if (!result) {
+          sabPathRef.current = 'sab';
+        }
       }
 
-      Atomics.store(control, 0, 0);
-      const start = performance.now();
-
-      const responsePromise = postRequest({
-        type: 'sharedBufferProcess',
-        requestId: createRequestId(),
-        version: WORKER_PROTOCOL_VERSION,
-        buffer: sab,
-        control: controlBuffer,
-        length,
-      });
-      const waitPromise = waitForAtomics(control);
-
-      const response = await responsePromise;
-      await waitPromise;
-      const end = performance.now();
-
-      setSabRoundTripTime(end - start);
-      if (response.type === 'sharedBufferDone') {
-        setSabComputeTime(response.durationMs);
+      if (sabPathRef.current === 'sab') {
+        result = await runSabCopy(length);
       }
+
+      if (sabPathRef.current === 'auto') {
+        const warmupLength = Math.min(20000, length);
+        const wasmWarm = await runWasmShared(warmupLength);
+        const sabWarm = await runSabCopy(warmupLength);
+
+        if (!wasmWarm && !sabWarm) {
+          throw new Error('SAB benchmark warmup failed');
+        }
+
+        if (!wasmWarm) {
+          sabPathRef.current = 'sab';
+        } else if (!sabWarm) {
+          sabPathRef.current = 'wasm';
+        } else if (wasmWarm.computeMs <= sabWarm.computeMs) {
+          sabPathRef.current = 'wasm';
+        } else {
+          sabPathRef.current = 'sab';
+        }
+
+        result =
+          sabPathRef.current === 'wasm'
+            ? await runWasmShared(length)
+            : await runSabCopy(length);
+      }
+
+      if (!sabWarmupDoneRef.current) {
+        const warmupResult =
+          sabPathRef.current === 'wasm'
+            ? await runWasmShared(length)
+            : await runSabCopy(length);
+        if (!warmupResult) {
+          throw new Error('SAB warmup failed');
+        }
+        sabWarmupDoneRef.current = true;
+        result =
+          sabPathRef.current === 'wasm'
+            ? await runWasmShared(length)
+            : await runSabCopy(length);
+      }
+
+      if (!result) {
+        throw new Error('SAB benchmark failed');
+      }
+
+      setSabRoundTripTime(result.roundTripMs);
+      setSabComputeTime(result.computeMs);
       setSabCompleted(true);
     } catch (error) {
       setWorkerError(error instanceof Error ? error.message : 'SAB error');
@@ -344,7 +509,7 @@ export default function Demo() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center justify-center gap-3">
-            Next.js + Rust (WASM) Template
+            next-rust-basic Template
             <a
               href="https://github.com/emirufak/next-rust-basic"
               target="_blank"
@@ -529,7 +694,7 @@ export default function Demo() {
               SharedArrayBuffer Demo
             </h2>
             <p className="text-sm text-gray-500 mb-4">
-              100000x iter(35) • zero-copy main {'<->'} worker • Atomics sync
+              100000x iter(35) - zero-copy main {'<->'} worker - Atomics sync
             </p>
             <button
               onClick={runSharedBufferDemo}
