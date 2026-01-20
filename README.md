@@ -8,28 +8,30 @@ Next.js 16, React 19 ve Rust (WebAssembly) ile yüksek performanslı web uygulam
 
 - **Next.js 16 (App Router):** Server Components ve Turbopack (WASM uyumluluğu için Webpack konfigürasyonu yapılmış) dahil en güncel özellikler.
 - **Rust & WebAssembly:** Yüksek performanslı hesaplama işlemleri için `wasm-bindgen` tabanlı iş akışı.
-- **Web Workers:** Ağır hesaplamaların ana thread'i bloklamaması için Web Worker entegrasyonu.
-- **SharedArrayBuffer:** Worker ve Ana Thread arasında sıfır kopyalama (zero-copy) veri transferi desteği.
-- **React 19:** Otomatik optimizasyon için React Compiler aktif.
-- **TypeScript:** Tip güvenliği için Strict mod açık.
-- **State Management:** Verimli global durum yönetimi için Zustand.
+- **Web Workers:** Ağır hesaplamaların ana thread'i bloklamaması için worker pool.
+- **SharedArrayBuffer:** Main thread ile Worker arasında zero-copy veri aktarımı.
+- **React 19:** React Compiler aktif.
+- **TypeScript:** Strict mod açık.
+- **State Management:** Zustand ile hafif ve hızlı durum yönetimi.
 - **Performans Analizi:** `@next/bundle-analyzer` önceden yapılandırılmış.
 - **Tailwind CSS:** Tailwind v4 ile modern stillendirme.
 
 ## Performans Teknolojileri
 
-- **SIMD-Style Operations:** 4-way loop unrolling ile paralel hesaplama
-- **Strassen Algorithm:** Büyük matrisler için O(n^2.807) karmaşıklık
-- **wasm-opt O3:** Binaryen ile maksimum optimizasyon (%22 küçülme)
-- **Atomics:** SharedArrayBuffer senkronizasyonu için donanım seviyesi kilitleme
-- **Enhanced Build:** LTO, single codegen unit ve panic=abort ile küçük binary
+- **SIMD-Style Operations:** 4-way loop unrolling ile SIMD benzeri paralel birikim.
+- **Strassen Algorithm:** Büyük matrisler için O(n^2.807) karmaşıklık.
+- **wasm-opt O3:** Binaryen ile maksimum optimizasyon (tipik olarak %20+ küçülme).
+- **Atomics:** SharedArrayBuffer senkronizasyonu için donanım seviyesi kilitleme.
+- **Enhanced Build:** LTO, single codegen unit ve panic=abort ile küçük binary.
+
+> Not: SharedArrayBuffer zero-copy aktarım main thread <-> worker arasındadır. wasm-bindgen, JS typed array verisini wasm belleğine kopyalar. Matrix ve sort benchmarklari, wasm belleğini doğrudan kullanarak bu kopyayı atlar.
 
 ## Demo Özellikleri
 
-- **Fibonacci Benchmark:** Recursive vs Iterative, JS vs WASM karşılaştırması
-- **Matrix Multiplication:** Naive O(n³) vs Strassen O(n^2.807)
-- **Array Sorting (Quicksort):** 1K - 10M element, JS vs WASM karşılaştırması
-- **SharedArrayBuffer Demo:** Atomics senkronizasyonu ile toplu fibonacci işleme
+- **Fibonacci Benchmark:** JS vs WASM karşılaştırması (worker içinde).
+- **Matrix Multiplication:** JS naive O(n^3) ve WASM için opsiyonel Strassen (power-of-two, n >= 128).
+- **Array Sorting (Quicksort):** 1K - 2.0M element (WASM bellek görünümü ile kopyasız).
+- **SharedArrayBuffer Demo:** Atomics senkronizasyonu ile toplu fibonacci_iter işlemi (compute time ve round-trip ayrı gösterilir).
 
 ## Gereksinimler
 
@@ -68,66 +70,99 @@ npx create-next-app -e https://github.com/emirufak/next-rust-basic projenizin-ad
 
 ### Yöntem 2: Manuel Kurulum
 
-1.  **Depoyu klonlayın:**
+1. **Depoyu klonlayın:**
 
-    ```bash
-    git clone https://github.com/emirufak/next-rust-basic.git projenizin-adi
-    cd projenizin-adi
-    ```
+   ```bash
+   git clone https://github.com/emirufak/next-rust-basic.git projenizin-adi
+   cd projenizin-adi
+   ```
 
-2.  **Bağımlılıkları yükleyin:**
-    Rust ve `wasm-bindgen` kuruluysa WASM derlemesi otomatik çalışır. Eksikse adım atlanır.
-    İsterseniz `SKIP_WASM_BUILD=1` ile bu adımı manuel hale getirebilirsiniz.
+2. **Bağımlılıkları yükleyin:**
+   Rust ve `wasm-bindgen` kuruluysa WASM derlemesi otomatik çalışır. Eksikse adım atlanır.
+   İsterseniz `SKIP_WASM_BUILD=1` ile bu adımı manuel hale getirebilirsiniz.
 
-    ```bash
-    npm install
-    ```
+   ```bash
+   npm install
+   ```
 
-3.  **Geliştirme sunucusunu başlatın:**
+3. **Geliştirme sunucusunu başlatın:**
 
-    ```bash
-    npm run dev
-    ```
+   ```bash
+   npm run dev
+   ```
 
-4.  **Tarayıcınızı açın:**
-    Demoyu görmek için [http://localhost:3000](http://localhost:3000) adresine gidin.
+4. **Tarayıcınızı açın:**
+   Demoyu görmek için [http://localhost:3000](http://localhost:3000) adresine gidin.
 
 ## Proje Yapısı
 
 ```plaintext
-├── crates/
-│   └── wasm/               # Rust kaynak kodları (wasm-lib)
-├── public/                 # Statik dosyalar
-├── src/
-│   ├── app/                # Next.js App Router sayfaları
-│   ├── components/         # React bileşenleri
-│   ├── lib/                # Yardımcı fonksiyonlar & State yönetimi
-│   ├── workers/            # Web Worker dosyaları
-├── scripts/                # Yardımcı build script'leri
-├── tests/                  # Testler (unit/e2e)
-├── next.config.ts          # Next.js konfigürasyonu (WASM & Analyzer)
-└── package.json            # Proje betikleri ve bağımlılıklar
+crates/
+  wasm/               # Rust kaynak kodları (wasm-lib)
+public/               # Statik dosyalar
+src/
+  app/                # Next.js App Router sayfaları
+  components/         # React bileşenleri
+  lib/                # Yardımcı fonksiyonlar & state yönetimi
+  workers/            # Web Worker dosyaları
+scripts/              # Yardımcı build script'leri
+tests/                # Testler (unit/e2e)
+next.config.ts        # Next.js konfigürasyonu (WASM & Analyzer)
+package.json          # Proje betikleri ve bağımlılıklar
 ```
 
 ## Komutlar (Scripts)
 
-- `npm run dev`: Geliştirme sunucusunu başlatır.
-- `npm run build`: Uygulamayı production için derler.
-- `npm run start`: Production sunucusunu başlatır.
-- `npm run build:wasm`: Rust kodunu manuel olarak WASM'a derler (wasm-bindgen pipeline).
-- `npm run analyze`: Build boyutunu görselleştirmek için bundle analyzer'ı çalıştırır.
-- `npm run test`: Unit testleri çalıştırır.
-- `npm run test:e2e`: E2E testleri çalıştırır.
+| Command              | Description                           |
+| -------------------- | ------------------------------------- |
+| `npm run dev`        | Geliştirme sunucusunu başlatır        |
+| `npm run build`      | Production build alır                 |
+| `npm run start`      | Production sunucusunu başlatır        |
+| `npm run build:wasm` | Rust kodunu WASM'a derler             |
+| `npm run build:wasm:shared` | Shared memory (SAB) destekli WASM derler |
+| `npm run analyze`    | Bundle analyzer çalıştırır            |
+| `npm run test`       | Unit testleri çalıştırır              |
+| `npm run test:e2e`   | E2E testleri çalıştırır               |
 
 ## Geliştirme
 
 ### Rust Kodu Ekleme
 
-1.  `crates/wasm/src/lib.rs` dosyasını düzenleyin.
-2.  Fonksiyonları `#[wasm_bindgen]` kullanarak dışa aktarın.
-3.  `npm run build:wasm` komutunu çalıştırın.
-4.  `src/workers/` altında yeni bir worker oluşturun veya mevcut worker'a ekleyin.
-5.  React bileşenlerinizde worker'ı çağırarak kullanın.
+1. `crates/wasm/src/lib.rs` dosyasını düzenleyin.
+2. Fonksiyonları `#[wasm_bindgen]` kullanarak dışa aktarın.
+3. `npm run build:wasm` komutunu çalıştırın.
+4. `src/workers/worker-messages.ts` altında yeni tip ekleyin.
+5. `src/workers/wasm.worker.ts` içinde handler ekleyin.
+6. React bileşenlerinde worker pool üzerinden çağırın.
+
+### Shared Memory Build (Optional)
+
+SharedArrayBuffer tabanlı WASM memory için:
+
+```bash
+npm run build:wasm:shared
+```
+
+> Not: Shared memory build için COOP/COEP gereklidir (bu template bunu zaten ayarlar).
+> Ek gereksinimler: `rustup toolchain install nightly`, `rustup component add rust-src --toolchain nightly`, `rustup target add wasm32-unknown-unknown --toolchain nightly`.
+
+### WASM Functions Available
+
+| Function                               | Description                                  |
+| -------------------------------------- | -------------------------------------------- |
+| `fibonacci(n)`                         | Recursive fibonacci - O(2^n)                 |
+| `fibonacci_iter(n)`                    | Iterative fibonacci - O(n)                   |
+| `process_shared_buffer(arr)`           | Batch fibonacci_iter on shared buffer        |
+| `sum_u32(arr)`                         | Sum of u32 array                             |
+| `sum_f32_simd(arr)`                    | SIMD-style sum with 4-way unrolling          |
+| `dot_product_simd(a, b)`               | SIMD-style dot product                       |
+| `matrix_multiply(a, b, c, n)`          | Naive matrix multiplication - O(n^3)         |
+| `matrix_multiply_strassen(a, b, c, n)` | Strassen algorithm - O(n^2.807)              |
+| `quicksort(arr)`                       | In-place quicksort                           |
+| `grayscale(data)`                      | Convert RGBA to grayscale (in-place)         |
+| `box_blur(data, w, h, r)`              | Apply box blur filter (in-place)             |
+| `fft_demo(input, output)`              | Compute DFT magnitude spectrum               |
+| `generate_signal(out, f1, f2, f3)`     | Generate test signal                         |
 
 ## Lisans
 
@@ -145,28 +180,30 @@ A production-ready template for building high-performance web applications with 
 
 - **Next.js 16 (App Router):** Latest features including Server Components and Turbopack (configured with Webpack for WASM compatibility).
 - **Rust & WebAssembly:** `wasm-bindgen`-based workflow for high-performance computing tasks.
-- **Web Workers:** Worker pool with round-robin scheduling to prevent blocking the main thread.
-- **SharedArrayBuffer:** Zero-copy data transfer between Worker and Main Thread with Atomics synchronization.
+- **Web Workers:** Worker pool to avoid blocking the main thread.
+- **SharedArrayBuffer:** Zero-copy data transfer between the main thread and workers.
 - **React 19:** React Compiler enabled for automatic optimization.
 - **TypeScript:** Strict mode enabled for type safety.
-- **State Management:** Zustand for efficient global state management.
+- **State Management:** Zustand for lightweight global state management.
 - **Performance Analysis:** `@next/bundle-analyzer` pre-configured.
 - **Tailwind CSS:** Modern styling with Tailwind v4.
 
 ## Performance Technologies
 
-- **SIMD-Style Operations:** 4-way loop unrolling for parallel accumulation
-- **Strassen Algorithm:** O(n^2.807) matrix multiplication for large matrices
-- **wasm-opt O3:** Maximum optimization via binaryen npm package (22% size reduction)
-- **Atomics:** Hardware-level synchronization for SharedArrayBuffer
-- **Enhanced Build:** LTO, single codegen unit, and panic=abort for smaller binary
+- **SIMD-Style Operations:** 4-way loop unrolling for SIMD-like parallel accumulation.
+- **Strassen Algorithm:** O(n^2.807) matrix multiplication for large matrices.
+- **wasm-opt O3:** Maximum optimization via binaryen (typically 20%+ smaller).
+- **Atomics:** Hardware-level synchronization for SharedArrayBuffer.
+- **Enhanced Build:** LTO, single codegen unit, and panic=abort for smaller binaries.
+
+> Note: SharedArrayBuffer zero-copy is between main thread and worker only. wasm-bindgen copies JS typed arrays into wasm memory. Matrix and sort benchmarks avoid this by writing directly into wasm memory.
 
 ## Demo Features
 
-- **Fibonacci Benchmark:** Recursive vs Iterative, JS vs WASM comparison
-- **Matrix Multiplication:** Naive O(n³) vs Strassen O(n^2.807)
-- **Array Sorting (Quicksort):** 1K - 10M elements, JS vs WASM comparison
-- **SharedArrayBuffer Demo:** Batch fibonacci processing with Atomics synchronization
+- **Fibonacci Benchmark:** JS vs WASM comparison (both in worker).
+- **Matrix Multiplication:** JS naive O(n^3) with optional Strassen in WASM (power-of-two, n >= 128).
+- **Array Sorting (Quicksort):** 1K - 2.0M elements (direct wasm memory view).
+- **SharedArrayBuffer Demo:** Batch fibonacci_iter with Atomics sync (compute time and round-trip shown separately).
 
 ## Prerequisites
 
@@ -195,8 +232,6 @@ If you see a `link.exe` error while installing `wasm-bindgen`:
 
 ## Getting Started
 
-The easiest way to create a new project using this template:
-
 ### Method 1: Using create-next-app (Recommended)
 
 ```bash
@@ -205,45 +240,45 @@ npx create-next-app -e https://github.com/emirufak/next-rust-basic your-project-
 
 ### Method 2: Manual Setup
 
-1.  **Clone the repository:**
+1. **Clone the repository:**
 
-    ```bash
-    git clone https://github.com/emirufak/next-rust-basic.git your-project-name
-    cd your-project-name
-    ```
+   ```bash
+   git clone https://github.com/emirufak/next-rust-basic.git your-project-name
+   cd your-project-name
+   ```
 
-2.  **Install dependencies:**
-    If Rust and `wasm-bindgen` are available, the WASM build runs automatically. If not, it is skipped.
-    You can force skip with `SKIP_WASM_BUILD=1` and run `npm run build:wasm` manually later.
+2. **Install dependencies:**
+   If Rust and `wasm-bindgen` are available, the WASM build runs automatically. If not, it is skipped.
+   You can force skip with `SKIP_WASM_BUILD=1` and run `npm run build:wasm` manually later.
 
-    ```bash
-    npm install
-    ```
+   ```bash
+   npm install
+   ```
 
-3.  **Run the development server:**
+3. **Run the development server:**
 
-    ```bash
-    npm run dev
-    ```
+   ```bash
+   npm run dev
+   ```
 
-4.  **Open your browser:**
-    Navigate to [http://localhost:3000](http://localhost:3000) to see the demo.
+4. **Open your browser:**
+   Navigate to [http://localhost:3000](http://localhost:3000) to see the demo.
 
 ## Project Structure
 
 ```plaintext
-├── crates/
-│   └── wasm/               # Rust source code (wasm-lib)
-├── public/                 # Static assets
-├── src/
-│   ├── app/                # Next.js App Router pages
-│   ├── components/         # React components
-│   ├── lib/                # Utility functions & State management
-│   ├── workers/            # WASM Worker pool
-├── scripts/                # Helper build scripts
-├── tests/                  # Tests (unit/e2e)
-├── next.config.ts          # Next.js configuration (WASM & Analyzer)
-└── package.json            # Project scripts and dependencies
+crates/
+  wasm/               # Rust source code (wasm-lib)
+public/               # Static assets
+src/
+  app/                # Next.js App Router pages
+  components/         # React components
+  lib/                # Utility functions & state management
+  workers/            # WASM Worker pool
+scripts/              # Helper build scripts
+tests/                # Tests (unit/e2e)
+next.config.ts        # Next.js configuration (WASM & Analyzer)
+package.json          # Project scripts and dependencies
 ```
 
 ## Scripts
@@ -254,6 +289,7 @@ npx create-next-app -e https://github.com/emirufak/next-rust-basic your-project-
 | `npm run build`      | Builds the application for production |
 | `npm run start`      | Starts the production server          |
 | `npm run build:wasm` | Manually builds Rust code to WASM     |
+| `npm run build:wasm:shared` | Builds WASM with shared memory (SAB) |
 | `npm run analyze`    | Runs bundle analyzer                  |
 | `npm run test`       | Runs unit tests (Vitest)              |
 | `npm run test:e2e`   | Runs E2E tests (Playwright)           |
@@ -269,22 +305,34 @@ npx create-next-app -e https://github.com/emirufak/next-rust-basic your-project-
 5. Add handlers in `src/workers/wasm.worker.ts`.
 6. Call from React components via the worker pool.
 
+### Shared Memory Build (Optional)
+
+For SharedArrayBuffer-backed WASM memory:
+
+```bash
+npm run build:wasm:shared
+```
+
+> Note: Shared memory builds require COOP/COEP (already enabled in this template).
+> Extra requirements: `rustup toolchain install nightly`, `rustup component add rust-src --toolchain nightly`, `rustup target add wasm32-unknown-unknown --toolchain nightly`.
+
 ### WASM Functions Available
 
-| Function                               | Description                          |
-| -------------------------------------- | ------------------------------------ |
-| `fibonacci(n)`                         | Recursive fibonacci - O(2^n)         |
-| `fibonacci_iter(n)`                    | Iterative fibonacci - O(n)           |
-| `sum_u32(arr)`                         | Sum of u32 array                     |
-| `sum_f32_simd(arr)`                    | SIMD-style sum with 4-way unrolling  |
-| `dot_product_simd(a, b)`               | SIMD-style dot product               |
-| `matrix_multiply(a, b, c, n)`          | Naive matrix multiplication - O(n³)  |
-| `matrix_multiply_strassen(a, b, c, n)` | Strassen algorithm - O(n^2.807)      |
-| `quicksort(arr)`                       | In-place quicksort                   |
-| `grayscale(data)`                      | Convert RGBA to grayscale (in-place) |
-| `box_blur(data, w, h, r)`              | Apply box blur filter (in-place)     |
-| `fft_demo(input, output)`              | Compute DFT magnitude spectrum       |
-| `generate_signal(out, f1, f2, f3)`     | Generate test signal                 |
+| Function                               | Description                                  |
+| -------------------------------------- | -------------------------------------------- |
+| `fibonacci(n)`                         | Recursive fibonacci - O(2^n)                 |
+| `fibonacci_iter(n)`                    | Iterative fibonacci - O(n)                   |
+| `process_shared_buffer(arr)`           | Batch fibonacci_iter on shared buffer        |
+| `sum_u32(arr)`                         | Sum of u32 array                             |
+| `sum_f32_simd(arr)`                    | SIMD-style sum with 4-way unrolling          |
+| `dot_product_simd(a, b)`               | SIMD-style dot product                       |
+| `matrix_multiply(a, b, c, n)`          | Naive matrix multiplication - O(n^3)         |
+| `matrix_multiply_strassen(a, b, c, n)` | Strassen algorithm - O(n^2.807)              |
+| `quicksort(arr)`                       | In-place quicksort                           |
+| `grayscale(data)`                      | Convert RGBA to grayscale (in-place)         |
+| `box_blur(data, w, h, r)`              | Apply box blur filter (in-place)             |
+| `fft_demo(input, output)`              | Compute DFT magnitude spectrum               |
+| `generate_signal(out, f1, f2, f3)`     | Generate test signal                         |
 
 ## License
 

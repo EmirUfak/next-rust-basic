@@ -31,14 +31,49 @@ pub fn fibonacci_iter(n: u32) -> u64 {
     b
 }
 
+fn fibonacci_iter_u32(n: u32) -> u32 {
+    if n == 0 {
+        return 0;
+    }
+    let (mut a, mut b) = (0u32, 1u32);
+    for _ in 1..n {
+        let temp = a.wrapping_add(b);
+        a = b;
+        b = temp;
+    }
+    b
+}
+
+// ============================================================================
+// MEMORY UTILITIES
+// ============================================================================
+
+#[wasm_bindgen]
+pub fn alloc_f64(len: usize) -> *mut f64 {
+    let mut buf = Vec::<f64>::with_capacity(len);
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+#[wasm_bindgen]
+pub fn free_f64(ptr: *mut f64, len: usize) {
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+    unsafe {
+        let _ = Vec::from_raw_parts(ptr, len, len);
+    }
+}
+
 // ============================================================================
 // ARRAY OPERATIONS
 // ============================================================================
 
 #[wasm_bindgen]
 pub fn process_shared_buffer(arr: &mut [u32]) {
-    for i in 0..arr.len() {
-        arr[i] = fibonacci(arr[i]);
+    for value in arr.iter_mut() {
+        *value = fibonacci_iter_u32(*value);
     }
 }
 
@@ -198,7 +233,13 @@ pub fn generate_signal(buffer: &mut [f64], freq1: f64, freq2: f64, freq3: f64) {
 // MATRIX OPERATIONS
 // ============================================================================
 
-/// Naive matrix multiplication - O(n³)
+const STRASSEN_THRESHOLD: usize = 128;
+
+fn is_power_of_two(n: usize) -> bool {
+    n != 0 && (n & (n - 1)) == 0
+}
+
+/// Naive matrix multiplication - O(n^3)
 #[wasm_bindgen]
 pub fn matrix_multiply(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
     for i in 0..n {
@@ -213,7 +254,7 @@ pub fn matrix_multiply(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
 }
 
 /// Strassen matrix multiplication - O(n^2.807)
-/// More efficient for large matrices (n >= 64)
+/// More efficient for large matrices (n >= 128, power of two)
 /// Uses divide-and-conquer with 7 multiplications instead of 8
 #[wasm_bindgen]
 pub fn matrix_multiply_strassen(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
@@ -222,14 +263,13 @@ pub fn matrix_multiply_strassen(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
     }
     
     // For small matrices, use naive algorithm (threshold tuned for WASM)
-    if n <= 64 {
+    if n <= STRASSEN_THRESHOLD {
         matrix_multiply(a, b, c, n);
         return;
     }
     
     // Ensure n is power of 2 for Strassen
-    let new_n = n.next_power_of_two();
-    if new_n != n {
+    if !is_power_of_two(n) {
         // Pad matrices and use naive for non-power-of-2
         matrix_multiply(a, b, c, n);
         return;
@@ -239,7 +279,7 @@ pub fn matrix_multiply_strassen(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
 }
 
 fn strassen_recursive(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
-    if n <= 64 {
+    if n <= STRASSEN_THRESHOLD {
         // Base case: use naive multiplication
         for i in 0..n {
             for j in 0..n {
@@ -352,6 +392,24 @@ fn matrix_sub(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
     }
 }
 
+#[wasm_bindgen]
+pub fn matrix_multiply_ptr(a_ptr: *const f64, b_ptr: *const f64, c_ptr: *mut f64, n: usize) {
+    let size = n * n;
+    let a = unsafe { std::slice::from_raw_parts(a_ptr, size) };
+    let b = unsafe { std::slice::from_raw_parts(b_ptr, size) };
+    let c = unsafe { std::slice::from_raw_parts_mut(c_ptr, size) };
+    matrix_multiply(a, b, c, n);
+}
+
+#[wasm_bindgen]
+pub fn matrix_multiply_strassen_ptr(a_ptr: *const f64, b_ptr: *const f64, c_ptr: *mut f64, n: usize) {
+    let size = n * n;
+    let a = unsafe { std::slice::from_raw_parts(a_ptr, size) };
+    let b = unsafe { std::slice::from_raw_parts(b_ptr, size) };
+    let c = unsafe { std::slice::from_raw_parts_mut(c_ptr, size) };
+    matrix_multiply_strassen(a, b, c, n);
+}
+
 // ============================================================================
 // SORTING
 // ============================================================================
@@ -362,6 +420,12 @@ pub fn quicksort(arr: &mut [f64]) {
         return;
     }
     quicksort_impl(arr, 0, arr.len() - 1);
+}
+
+#[wasm_bindgen]
+pub fn quicksort_ptr(ptr: *mut f64, len: usize) {
+    let arr = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+    quicksort(arr);
 }
 
 fn quicksort_impl(arr: &mut [f64], low: usize, high: usize) {
@@ -386,3 +450,4 @@ fn partition(arr: &mut [f64], low: usize, high: usize) -> usize {
     arr.swap(i, high);
     i
 }
+

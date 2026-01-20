@@ -11,6 +11,7 @@
     "lint": "eslint",
     "analyze": "cross-env ANALYZE=true next build",
     "build:wasm": "node scripts/build-wasm.mjs",
+    "build:wasm:shared": "cross-env WASM_SHARED=1 node scripts/build-wasm.mjs",
     "postinstall": "node scripts/maybe-build-wasm.mjs",
     "test": "vitest",
     "test:watch": "vitest --watch",
