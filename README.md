@@ -1,150 +1,152 @@
 # next-rust-basic Template
 
-Next.js 16, React 19 ve Rust (WebAssembly) ile yüksek performanslı web uygulamaları geliştirmek için production-ready (üretime hazır) bir şablon.
+Next.js 16, React 19 ve Rust (WebAssembly) ile yuksek performansli web uygulamalari gelistirmek icin production-ready (uretime hazir) bir sablon.
 
 [English Version Below](#next-rust-basic-template-english)
 
-## Özellikler
+## Ozellikler
 
-- **Next.js 16 (App Router):** Server Components ve Turbopack (WASM uyumluluğu için Webpack konfigürasyonu yapılmış) dahil en güncel özellikler.
-- **Rust & WebAssembly:** Yüksek performanslı hesaplama işlemleri için `wasm-bindgen` tabanlı iş akışı.
-- **Web Workers:** Ağır hesaplamaların ana thread'i bloklamaması için worker pool.
-- **SharedArrayBuffer:** Main thread ile Worker arasında zero-copy veri aktarımı.
+- **Next.js 16 (App Router):** Server Components ve Turbopack (WASM uyumlulugu icin Webpack konfigrasyonu yapilmis) dahil en guncel ozellikler.
+- **Rust & WebAssembly:** Yuksek performansli hesaplama islemleri icin `wasm-bindgen` tabanli is akis.
+- **Web Workers:** Agir hesaplamalarin ana thread'i bloklamamasi icin worker pool.
+- **SharedArrayBuffer:** Main thread ile Worker arasinda zero-copy veri aktarimi.
 - **React 19:** React Compiler aktif.
-- **TypeScript:** Strict mod açık.
-- **State Management:** Zustand ile hafif ve hızlı durum yönetimi.
-- **Performans Analizi:** `@next/bundle-analyzer` önceden yapılandırılmış.
+- **TypeScript:** Strict mod acik.
+- **State Management:** Zustand ile hafif ve hizli durum yonetimi.
+- **Performans Analizi:** `@next/bundle-analyzer` onceden yapilandirilmis.
 - **Tailwind CSS:** Tailwind v4 ile modern stillendirme.
 
 ## Performans Teknolojileri
 
-- **SIMD-Style Operations:** 4-way loop unrolling ile SIMD benzeri paralel birikim.
-- **Strassen Algorithm:** Büyük matrisler için O(n^2.807) karmaşıklık.
-- **wasm-opt O3:** Binaryen ile maksimum optimizasyon (tipik olarak %20+ küçülme).
-- **Atomics:** SharedArrayBuffer senkronizasyonu için donanım seviyesi kilitleme.
-- **Enhanced Build:** LTO, single codegen unit ve panic=abort ile küçük binary.
+- **SIMD128 (v128):** sum/dot/grayscale icin gercek SIMD yolu + scalar fallback.
+- **Strassen Algorithm:** Buyuk matrisler icin O(n^2.807) karmasiklik.
+- **wasm-opt O3:** Binaryen ile maksimum optimizasyon (tipik olarak %20+ kuculme).
+- **Atomics:** SharedArrayBuffer senkronizasyonu icin donanim seviyesi kilitleme.
+- **Enhanced Build:** LTO, single codegen unit ve panic=abort ile kucuk binary.
 
-> Not: SharedArrayBuffer zero-copy aktarım main thread <-> worker arasındadır. wasm-bindgen, JS typed array verisini wasm belleğine kopyalar. Matrix ve sort benchmarklari, wasm belleğini doğrudan kullanarak bu kopyayı atlar.
+> Not: SharedArrayBuffer zero-copy aktarim main thread <-> worker arasindadir. Varsayilan wasm-bindgen baglantilarinda JS typed array verisi wasm bellegine kopyalanir. Matrix ve sort benchmarklari pointer API + wasm bellegi gorunumu ile bu kopyayi atlar. `WASM_SHARED=1` build aktifse, JS tarafi wasm.memory.buffer uzerinden dogrudan paylasimli bellek kullanabilir; bu yol pure compute icin her zaman daha hizli olmayabilir.
 
-## Demo Özellikleri
+## Demo Ozellikleri
 
-- **Fibonacci Benchmark:** JS vs WASM karşılaştırması (worker içinde).
-- **Matrix Multiplication:** JS naive O(n^3) ve WASM için opsiyonel Strassen (power-of-two, n >= 128).
-- **Array Sorting (Quicksort):** 1K - 50M element (WASM bellek görünümü ile kopyasız).
-- **SharedArrayBuffer Demo:** Atomics senkronizasyonu ile toplu fibonacci_iter işlemi (compute time ve round-trip ayrı gösterilir).
+- **Fibonacci Benchmark:** JS vs WASM karsilastirmasi (worker icinde).
+- **Matrix Multiplication:** JS naive O(n^3) ve WASM icin opsiyonel Strassen (power-of-two, n >= 128).
+- **Array Sorting (Quicksort):** 1K - 50M element (WASM bellek gorunumu ile kopyasiz).
+- **SharedArrayBuffer Demo:** Atomics senkronizasyonu ile toplu fibonacci_iter islemi (compute time ve round-trip ayri gosterilir).
 
 ## Gereksinimler
 
-Başlamadan önce aşağıdakilerin kurulu olduğundan emin olun:
+Baslamadan once asagidakilerin kurulu oldugundan emin olun:
 
-- **Node.js** (v18 veya üzeri)
+- **Node.js** (v18 veya uzeri)
 - **Rust & Cargo:** [Rust Kurulumu](https://www.rust-lang.org/tools/install)
-- **(Opsiyonel) wasm-bindgen-cli:** JS/TS bağlayıcıları için gereklidir.
-- **(Opsiyonel) wasm-opt (binaryen):** Ek optimizasyon için.
+- **(Opsiyonel) wasm-bindgen-cli:** JS/TS baglayicilari icin gereklidir.
+- **(Opsiyonel) wasm-opt (binaryen):** Ek optimizasyon icin.
 
-### Windows için Visual Studio Build Tools
+### Windows icin Visual Studio Build Tools
 
-`wasm-bindgen` kurulumu sırasında `link.exe` hatası alırsanız:
+`wasm-bindgen` kurulumu sirasinda `link.exe` hatasi alirsaniz:
 
 1. Visual Studio Build Tools indirin: https://visualstudio.microsoft.com/downloads/
-2. "Desktop development with C++" iş yükünü seçin.
-3. "MSVC v143" ve "Windows 10/11 SDK" bileşenlerini işaretleyin.
-4. Kurulum sonrası terminali kapatıp açın ve tekrar deneyin.
+2. "Desktop development with C++" is yukunu secin.
+3. "MSVC v143" ve "Windows 10/11 SDK" bilesenlerini isaretleyin.
+4. Kurulum sonrasi terminali kapatip acin ve tekrar deneyin.
 
 ### wasm-bindgen Kurulumu (Windows)
 
-1. Rust yüklü olduğundan emin olun.
-2. `cargo install wasm-bindgen-cli` ile kurulumu yapın.
-3. Terminali kapatıp yeniden açın (PATH güncellemesi için).
-4. `wasm-bindgen --version` ile doğrulayın.
+1. Rust yuklu oldugundan emin olun.
+2. `cargo install wasm-bindgen-cli` ile kurulumu yapin.
+3. Terminali kapatip yeniden acin (PATH guncellemesi icin).
+4. `wasm-bindgen --version` ile dogrulayin.
 
-## Başlangıç
+## Baslangic
 
-Bu şablonu kullanarak yeni bir proje oluşturmanın en kolay yolu:
+Bu sablonu kullanarak yeni bir proje olusturmanin en kolay yolu:
 
-### Yöntem 1: create-next-app ile (Önerilen)
+### Yontem 1: create-next-app ile (Onerilen)
 
 ```bash
 npx create-next-app -e https://github.com/emirufak/next-rust-basic projenizin-adi
 ```
 
-### Yöntem 2: Manuel Kurulum
+### Yontem 2: Manuel Kurulum
 
-1. **Depoyu klonlayın:**
+1. **Depoyu klonlayin:**
 
    ```bash
    git clone https://github.com/emirufak/next-rust-basic.git projenizin-adi
    cd projenizin-adi
    ```
 
-2. **Bağımlılıkları yükleyin:**
-   Rust ve `wasm-bindgen` kuruluysa WASM derlemesi otomatik çalışır. Eksikse adım atlanır.
-   İsterseniz `SKIP_WASM_BUILD=1` ile bu adımı manuel hale getirebilirsiniz.
+2. **Bagimliliklari yukleyin:**
+   Rust ve `wasm-bindgen` kuruluysa WASM derlemesi otomatik calisir. Eksikse adim atlanir.
+   Isterseniz `SKIP_WASM_BUILD=1` ile bu adimi manuel hale getirebilirsiniz.
 
    ```bash
    npm install
    ```
 
-3. **Geliştirme sunucusunu başlatın:**
+3. **Gelistirme sunucusunu baslatin:**
 
    ```bash
    npm run dev
    ```
 
-4. **Tarayıcınızı açın:**
-   Demoyu görmek için [http://localhost:3000](http://localhost:3000) adresine gidin.
+4. **Tarayicinizi acin:**
+   Demoyu gormek icin [http://localhost:3000](http://localhost:3000) adresine gidin.
 
-## Proje Yapısı
+## Proje Yapisi
 
 ```plaintext
 crates/
-  wasm/               # Rust kaynak kodları (wasm-lib)
+  wasm/               # Rust kaynak kodlari (wasm-lib)
 public/               # Statik dosyalar
 src/
-  app/                # Next.js App Router sayfaları
-  components/         # React bileşenleri
-  lib/                # Yardımcı fonksiyonlar & state yönetimi
-  workers/            # Web Worker dosyaları
-scripts/              # Yardımcı build script'leri
+  app/                # Next.js App Router sayfalari
+  components/         # React bilesenleri
+  lib/                # Yardimci fonksiyonlar & state yonetimi
+  workers/            # Web Worker dosyalari
+scripts/              # Yardimci build script'leri
 tests/                # Testler (unit/e2e)
-next.config.ts        # Next.js konfigürasyonu (WASM & Analyzer)
-package.json          # Proje betikleri ve bağımlılıklar
+next.config.ts        # Next.js konfigurasyonu (WASM & Analyzer)
+package.json          # Proje betikleri ve bagimliliklar
 ```
 
 ## Komutlar (Scripts)
 
 | Command              | Description                           |
 | -------------------- | ------------------------------------- |
-| `npm run dev`        | Geliştirme sunucusunu başlatır        |
-| `npm run build`      | Production build alır                 |
-| `npm run start`      | Production sunucusunu başlatır        |
+| `npm run dev`        | Gelistirme sunucusunu baslatir        |
+| `npm run dev:shared` | Shared memory build ile dev baslatir  |
+| `npm run build`      | Production build alir                 |
+| `npm run start`      | Production sunucusunu baslatir        |
 | `npm run build:wasm` | Rust kodunu WASM'a derler             |
 | `npm run build:wasm:shared` | Shared memory (SAB) destekli WASM derler |
-| `npm run analyze`    | Bundle analyzer çalıştırır            |
-| `npm run test`       | Unit testleri çalıştırır              |
-| `npm run test:e2e`   | E2E testleri çalıştırır               |
+| `npm run analyze`    | Bundle analyzer calistirir            |
+| `npm run test`       | Unit testleri calistirir              |
+| `npm run test:e2e`   | E2E testleri calistirir               |
 
-## Geliştirme
+## Gelistirme
 
 ### Rust Kodu Ekleme
 
-1. `crates/wasm/src/lib.rs` dosyasını düzenleyin.
-2. Fonksiyonları `#[wasm_bindgen]` kullanarak dışa aktarın.
-3. `npm run build:wasm` komutunu çalıştırın.
-4. `src/workers/worker-messages.ts` altında yeni tip ekleyin.
-5. `src/workers/wasm.worker.ts` içinde handler ekleyin.
-6. React bileşenlerinde worker pool üzerinden çağırın.
+1. `crates/wasm/src/lib.rs` dosyasini duzenleyin.
+2. Fonksiyonlari `#[wasm_bindgen]` kullanarak disa aktarin.
+3. `npm run build:wasm` komutunu calistirin.
+4. `src/workers/worker-messages.ts` altinda yeni tip ekleyin.
+5. `src/workers/wasm/handlers` altinda handler ekleyin.
+6. React bilesenlerinde worker pool uzerinden cagirin.
 
 ### Shared Memory Build (Optional)
 
-SharedArrayBuffer tabanlı WASM memory için:
+SharedArrayBuffer tabanli WASM memory icin:
 
 ```bash
 npm run build:wasm:shared
 ```
 
-> Not: Shared memory build için COOP/COEP gereklidir (bu template bunu zaten ayarlar).
+> Not: Shared memory build icin COOP/COEP gereklidir (bu template bunu zaten ayarlar).
 > Ek gereksinimler: `rustup toolchain install nightly`, `rustup component add rust-src --toolchain nightly`, `rustup target add wasm32-unknown-unknown --toolchain nightly`.
+> Bu build atomics + shared-memory flag'leri kullanir; saf compute testlerinde bazen daha yavas olabilir.
 
 ### WASM Functions Available
 
@@ -154,8 +156,8 @@ npm run build:wasm:shared
 | `fibonacci_iter(n)`                    | Iterative fibonacci - O(n)                   |
 | `process_shared_buffer(arr)`           | Batch fibonacci_iter on shared buffer        |
 | `sum_u32(arr)`                         | Sum of u32 array                             |
-| `sum_f32_simd(arr)`                    | SIMD-style sum with 4-way unrolling          |
-| `dot_product_simd(a, b)`               | SIMD-style dot product                       |
+| `sum_f32_simd(arr)`                    | SIMD128 (v128) sum + scalar fallback         |
+| `dot_product_simd(a, b)`               | SIMD128 (v128) dot product + fallback        |
 | `matrix_multiply(a, b, c, n)`          | Naive matrix multiplication - O(n^3)         |
 | `matrix_multiply_strassen(a, b, c, n)` | Strassen algorithm - O(n^2.807)              |
 | `quicksort(arr)`                       | In-place quicksort                           |
@@ -163,6 +165,8 @@ npm run build:wasm:shared
 | `box_blur(data, w, h, r)`              | Apply box blur filter (in-place)             |
 | `fft_demo(input, output)`              | Compute DFT magnitude spectrum               |
 | `generate_signal(out, f1, f2, f3)`     | Generate test signal                         |
+
+> Not: Pointer tabanli API'ler (alloc/free + `*_ptr`) buyuk veri icin zero-copy yol saglar.
 
 ## Lisans
 
@@ -190,13 +194,13 @@ A production-ready template for building high-performance web applications with 
 
 ## Performance Technologies
 
-- **SIMD-Style Operations:** 4-way loop unrolling for SIMD-like parallel accumulation.
+- **SIMD128 (v128):** Real SIMD path for sum/dot/grayscale with scalar fallback.
 - **Strassen Algorithm:** O(n^2.807) matrix multiplication for large matrices.
 - **wasm-opt O3:** Maximum optimization via binaryen (typically 20%+ smaller).
 - **Atomics:** Hardware-level synchronization for SharedArrayBuffer.
 - **Enhanced Build:** LTO, single codegen unit, and panic=abort for smaller binaries.
 
-> Note: SharedArrayBuffer zero-copy is between main thread and worker only. wasm-bindgen copies JS typed arrays into wasm memory. Matrix and sort benchmarks avoid this by writing directly into wasm memory.
+> Note: SharedArrayBuffer zero-copy is between main thread and worker only. wasm-bindgen copies JS typed arrays into wasm memory. Matrix and sort benchmarks avoid this by writing directly into wasm memory. With `WASM_SHARED=1`, JS can access wasm.memory.buffer as shared memory; pure compute can be slower in this mode.
 
 ## Demo Features
 
@@ -286,6 +290,7 @@ package.json          # Project scripts and dependencies
 | Command              | Description                           |
 | -------------------- | ------------------------------------- |
 | `npm run dev`        | Starts the development server         |
+| `npm run dev:shared` | Starts dev with shared memory build   |
 | `npm run build`      | Builds the application for production |
 | `npm run start`      | Starts the production server          |
 | `npm run build:wasm` | Manually builds Rust code to WASM     |
@@ -302,7 +307,7 @@ package.json          # Project scripts and dependencies
 2. Expose functions using `#[wasm_bindgen]`.
 3. Run `npm run build:wasm`.
 4. Add message types to `src/workers/worker-messages.ts`.
-5. Add handlers in `src/workers/wasm.worker.ts`.
+5. Add handlers under `src/workers/wasm/handlers`.
 6. Call from React components via the worker pool.
 
 ### Shared Memory Build (Optional)
@@ -315,6 +320,7 @@ npm run build:wasm:shared
 
 > Note: Shared memory builds require COOP/COEP (already enabled in this template).
 > Extra requirements: `rustup toolchain install nightly`, `rustup component add rust-src --toolchain nightly`, `rustup target add wasm32-unknown-unknown --toolchain nightly`.
+> This build uses atomics + shared-memory flags; pure compute benchmarks can be slower.
 
 ### WASM Functions Available
 
@@ -324,8 +330,8 @@ npm run build:wasm:shared
 | `fibonacci_iter(n)`                    | Iterative fibonacci - O(n)                   |
 | `process_shared_buffer(arr)`           | Batch fibonacci_iter on shared buffer        |
 | `sum_u32(arr)`                         | Sum of u32 array                             |
-| `sum_f32_simd(arr)`                    | SIMD-style sum with 4-way unrolling          |
-| `dot_product_simd(a, b)`               | SIMD-style dot product                       |
+| `sum_f32_simd(arr)`                    | SIMD128 (v128) sum + scalar fallback         |
+| `dot_product_simd(a, b)`               | SIMD128 (v128) dot product + fallback        |
 | `matrix_multiply(a, b, c, n)`          | Naive matrix multiplication - O(n^3)         |
 | `matrix_multiply_strassen(a, b, c, n)` | Strassen algorithm - O(n^2.807)              |
 | `quicksort(arr)`                       | In-place quicksort                           |
@@ -333,6 +339,8 @@ npm run build:wasm:shared
 | `box_blur(data, w, h, r)`              | Apply box blur filter (in-place)             |
 | `fft_demo(input, output)`              | Compute DFT magnitude spectrum               |
 | `generate_signal(out, f1, f2, f3)`     | Generate test signal                         |
+
+> Note: Pointer-based APIs (alloc/free + `*_ptr`) are available for large zero-copy workloads.
 
 ## License
 
