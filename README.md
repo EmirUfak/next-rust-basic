@@ -1,3 +1,6 @@
+
+<img width="1206" height="896" alt="rust-readme" src="https://github.com/user-attachments/assets/2296ceea-9cf0-4a48-8c42-264ee98f5f24" />
+
 # next-rust-basic Template
 
 Next.js 16, React 19 ve Rust (WebAssembly) ile yuksek performansli web uygulamalari gelistirmek icin production-ready (uretime hazir) bir sablon.
