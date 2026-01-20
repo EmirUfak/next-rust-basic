@@ -80,6 +80,17 @@ export class WorkerPool {
     return this.post(entry, request);
   }
 
+  requestOnWorker(index: number, request: WorkerRequest): Promise<WorkerResponse> {
+    if (this.entries.length === 0) {
+      return Promise.reject(new Error('Worker pool is not initialized'));
+    }
+    const entry = this.entries[index];
+    if (!entry) {
+      return Promise.reject(new Error('Worker index out of range'));
+    }
+    return this.post(entry, request);
+  }
+
   private post(entry: WorkerEntry, request: WorkerRequest): Promise<WorkerResponse> {
     return new Promise<WorkerResponse>((resolve, reject) => {
       entry.pending.set(request.requestId, { resolve, reject });

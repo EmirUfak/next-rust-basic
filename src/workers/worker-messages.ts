@@ -1,5 +1,5 @@
 export const WORKER_PROTOCOL_VERSION = 1 as const;
-export const MAX_BUFFER_LENGTH = 10_000_000;
+export const MAX_BUFFER_LENGTH = 50_000_000;
 export const MAX_IMAGE_SIZE = 16_000_000; // 4K x 4K x 4 channels
 export const MAX_MATRIX_SIZE = 1500;
 
@@ -17,6 +17,8 @@ export type WorkerRequest =
   | { type: 'fibonacciBatchJs'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; n: number; iterations: number }
   | { type: 'fibonacciIterBatch'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; n: number; iterations: number }
   // SharedArrayBuffer
+  | { type: 'sharedMemoryInit'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; length: number }
+  | { type: 'sharedMemoryProcess'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; ptr: number; length: number; control: SharedArrayBuffer }
   | { type: 'sharedBufferProcess'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; buffer: SharedArrayBuffer; control: SharedArrayBuffer; length: number }
   // Array operations
   | { type: 'sumArray'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; data: Uint32Array }
@@ -58,6 +60,8 @@ export type WorkerResponse =
   | { type: 'fibonacciBatchJsResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number; iterations: number }
   | { type: 'fibonacciIterBatchResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: bigint; iterations: number }
   // SharedArrayBuffer results
+  | { type: 'sharedMemoryReady'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; available: boolean; buffer?: SharedArrayBuffer; ptr?: number; length?: number }
+  | { type: 'sharedMemoryProcessDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; durationMs: number }
   | { type: 'sharedBufferDone'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; durationMs: number }
   // Array results
   | { type: 'sumArrayResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number }
@@ -92,7 +96,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const validRequestTypes = new Set([
   'ping', 'warmup', 'fibonacci', 'fibonacciIter', 'fibonacciBatch', 'fibonacciBatchJs', 'fibonacciIterBatch',
-  'sharedBufferProcess', 'sumArray', 'sumArraySab', 'dotProductSimd', 'sumF32Simd',
+  'sharedMemoryInit', 'sharedMemoryProcess', 'sharedBufferProcess', 'sumArray', 'sumArraySab', 'dotProductSimd', 'sumF32Simd',
   'grayscale', 'boxBlur', 'fftDemo', 'generateSignal',
   'matrixMultiply', 'matrixMultiplyJs', 'matrixMultiplyStrassen', 'matrixMultiplyJsBench', 'matrixMultiplyWasmBench',
   'quicksort', 'quicksortJs', 'quicksortJsBench', 'quicksortWasmBench'
@@ -108,7 +112,7 @@ export const isWorkerRequest = (value: unknown): value is WorkerRequest => {
 const validResponseTypes = new Set([
   'ready', 'warmupDone', 'error',
   'fibonacciResult', 'fibonacciIterResult', 'fibonacciBatchResult', 'fibonacciBatchJsResult', 'fibonacciIterBatchResult',
-  'sharedBufferDone', 'sumArrayResult', 'sumArraySabResult',
+  'sharedMemoryReady', 'sharedMemoryProcessDone', 'sharedBufferDone', 'sumArrayResult', 'sumArraySabResult',
   'dotProductSimdResult', 'sumF32SimdResult',
   'grayscaleDone', 'boxBlurDone', 'fftDemoDone', 'generateSignalDone',
   'matrixMultiplyDone', 'matrixMultiplyJsDone', 'matrixMultiplyStrassenDone', 'matrixMultiplyJsBenchDone', 'matrixMultiplyWasmBenchDone',

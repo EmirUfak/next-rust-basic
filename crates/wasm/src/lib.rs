@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 
 // ============================================================================
@@ -66,6 +67,24 @@ pub fn free_f64(ptr: *mut f64, len: usize) {
     }
 }
 
+#[wasm_bindgen]
+pub fn alloc_u32(len: usize) -> *mut u32 {
+    let mut buf = Vec::<u32>::with_capacity(len);
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+#[wasm_bindgen]
+pub fn free_u32(ptr: *mut u32, len: usize) {
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+    unsafe {
+        let _ = Vec::from_raw_parts(ptr, len, len);
+    }
+}
+
 // ============================================================================
 // ARRAY OPERATIONS
 // ============================================================================
@@ -75,6 +94,12 @@ pub fn process_shared_buffer(arr: &mut [u32]) {
     for value in arr.iter_mut() {
         *value = fibonacci_iter_u32(*value);
     }
+}
+
+#[wasm_bindgen]
+pub fn process_shared_buffer_ptr(ptr: *mut u32, len: usize) {
+    let arr = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+    process_shared_buffer(arr);
 }
 
 #[wasm_bindgen]
@@ -91,6 +116,14 @@ pub fn sum_u32_sab(arr: &[u32]) -> u32 {
 /// Manual unrolling mimics SIMD behavior for better performance
 #[wasm_bindgen]
 pub fn sum_f32_simd(arr: &[f32]) -> f32 {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    unsafe {
+        return sum_f32_simd128(arr);
+    }
+    sum_f32_fallback(arr)
+}
+
+fn sum_f32_fallback(arr: &[f32]) -> f32 {
     let chunks = arr.chunks_exact(4);
     let remainder = chunks.remainder();
     
@@ -113,10 +146,40 @@ pub fn sum_f32_simd(arr: &[f32]) -> f32 {
     total
 }
 
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn sum_f32_simd128(arr: &[f32]) -> f32 {
+    use core::arch::wasm32::*;
+    let mut acc = f32x4_splat(0.0);
+    let chunks = arr.chunks_exact(4);
+    let remainder = chunks.remainder();
+
+    for chunk in chunks {
+        let v = v128_load(chunk.as_ptr() as *const v128);
+        acc = f32x4_add(acc, v);
+    }
+
+    let mut out = [0f32; 4];
+    v128_store(out.as_mut_ptr() as *mut v128, acc);
+    let mut total = out[0] + out[1] + out[2] + out[3];
+    for &val in remainder {
+        total += val;
+    }
+    total
+}
+
 /// SIMD-style dot product using loop unrolling
 /// 4-way parallel accumulation for better CPU pipeline utilization
 #[wasm_bindgen]
 pub fn dot_product_simd(a: &[f32], b: &[f32]) -> f32 {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    unsafe {
+        return dot_product_simd128(a, b);
+    }
+    dot_product_fallback(a, b)
+}
+
+fn dot_product_fallback(a: &[f32], b: &[f32]) -> f32 {
     let len = a.len().min(b.len());
     let a = &a[..len];
     let b = &b[..len];
@@ -145,12 +208,50 @@ pub fn dot_product_simd(a: &[f32], b: &[f32]) -> f32 {
     total
 }
 
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn dot_product_simd128(a: &[f32], b: &[f32]) -> f32 {
+    use core::arch::wasm32::*;
+    let len = a.len().min(b.len());
+    let a = &a[..len];
+    let b = &b[..len];
+
+    let mut acc = f32x4_splat(0.0);
+    let chunks_a = a.chunks_exact(4);
+    let chunks_b = b.chunks_exact(4);
+    let remainder_a = chunks_a.remainder();
+    let remainder_b = chunks_b.remainder();
+
+    for (ca, cb) in chunks_a.zip(chunks_b) {
+        let va = v128_load(ca.as_ptr() as *const v128);
+        let vb = v128_load(cb.as_ptr() as *const v128);
+        acc = f32x4_add(acc, f32x4_mul(va, vb));
+    }
+
+    let mut out = [0f32; 4];
+    v128_store(out.as_mut_ptr() as *mut v128, acc);
+    let mut total = out[0] + out[1] + out[2] + out[3];
+    for (&va, &vb) in remainder_a.iter().zip(remainder_b.iter()) {
+        total += va * vb;
+    }
+    total
+}
+
 // ============================================================================
 // IMAGE PROCESSING
 // ============================================================================
 
 #[wasm_bindgen]
 pub fn grayscale(data: &mut [u8]) {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    unsafe {
+        grayscale_simd128(data);
+        return;
+    }
+    grayscale_scalar(data);
+}
+
+fn grayscale_scalar(data: &mut [u8]) {
     for chunk in data.chunks_exact_mut(4) {
         let r = chunk[0] as f32;
         let g = chunk[1] as f32;
@@ -159,6 +260,45 @@ pub fn grayscale(data: &mut [u8]) {
         chunk[0] = gray;
         chunk[1] = gray;
         chunk[2] = gray;
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn grayscale_simd128(data: &mut [u8]) {
+    use core::arch::wasm32::*;
+    let pixel_count = data.len() / 4;
+    let mut i = 0usize;
+    let pixels_ptr = data.as_mut_ptr() as *mut u32;
+
+    let mask = i32x4_splat(0xFF);
+    let alpha_mask = i32x4_splat(0xFF000000u32 as i32);
+    let weight_r = i32x4_splat(77);
+    let weight_g = i32x4_splat(150);
+    let weight_b = i32x4_splat(29);
+    let rgb_mask = i32x4_splat(0x010101);
+
+    while i + 4 <= pixel_count {
+        let ptr = pixels_ptr.add(i) as *const v128;
+        let v = v128_load(ptr);
+        let r = v128_and(v, mask);
+        let g = v128_and(i32x4_shr(v, 8), mask);
+        let b = v128_and(i32x4_shr(v, 16), mask);
+        let sum = i32x4_add(
+            i32x4_add(i32x4_mul(r, weight_r), i32x4_mul(g, weight_g)),
+            i32x4_mul(b, weight_b),
+        );
+        let gray = i32x4_shr(sum, 8);
+        let gray_rgb = i32x4_mul(gray, rgb_mask);
+        let alpha = v128_and(v, alpha_mask);
+        let out = v128_or(alpha, gray_rgb);
+        v128_store(pixels_ptr.add(i) as *mut v128, out);
+        i += 4;
+    }
+
+    let tail_start = i * 4;
+    if tail_start < data.len() {
+        grayscale_scalar(&mut data[tail_start..]);
     }
 }
 
@@ -233,15 +373,68 @@ pub fn generate_signal(buffer: &mut [f64], freq1: f64, freq2: f64, freq3: f64) {
 // MATRIX OPERATIONS
 // ============================================================================
 
-const STRASSEN_THRESHOLD: usize = 128;
+const STRASSEN_THRESHOLD_MIN: usize = 64;
+const STRASSEN_THRESHOLD_MAX: usize = 512;
+const BLOCK_SIZE: usize = 32;
+const BLOCK_THRESHOLD: usize = 512;
+
+static mut STRASSEN_THRESHOLD: usize = 128;
 
 fn is_power_of_two(n: usize) -> bool {
     n != 0 && (n & (n - 1)) == 0
 }
 
-/// Naive matrix multiplication - O(n^3)
 #[wasm_bindgen]
-pub fn matrix_multiply(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
+pub fn set_strassen_threshold(value: usize) {
+    let clamped = value.clamp(STRASSEN_THRESHOLD_MIN, STRASSEN_THRESHOLD_MAX);
+    unsafe {
+        STRASSEN_THRESHOLD = clamped;
+    }
+}
+
+#[wasm_bindgen]
+pub fn get_strassen_threshold() -> usize {
+    unsafe { STRASSEN_THRESHOLD }
+}
+
+fn strassen_threshold() -> usize {
+    unsafe { STRASSEN_THRESHOLD }
+}
+
+struct Workspace {
+    buf: Vec<f64>,
+    offset: usize,
+}
+
+impl Workspace {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            buf: vec![0.0; capacity],
+            offset: 0,
+        }
+    }
+
+    fn mark(&self) -> usize {
+        self.offset
+    }
+
+    fn reset(&mut self, mark: usize) {
+        self.offset = mark;
+    }
+
+    fn alloc_ptr(&mut self, len: usize) -> *mut f64 {
+        let start = self.offset;
+        let end = start + len;
+        if end > self.buf.len() {
+            panic!("workspace capacity exceeded");
+        }
+        self.offset = end;
+        let ptr = self.buf.as_mut_ptr();
+        unsafe { ptr.add(start) }
+    }
+}
+
+fn matrix_multiply_naive(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
     for i in 0..n {
         for j in 0..n {
             let mut sum = 0.0;
@@ -253,17 +446,61 @@ pub fn matrix_multiply(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
     }
 }
 
+fn matrix_multiply_blocked(a: &[f64], b: &[f64], c: &mut [f64], n: usize, block: usize) {
+    c.fill(0.0);
+    let bs = block.max(1);
+    let mut ii = 0;
+    while ii < n {
+        let i_max = (ii + bs).min(n);
+        let mut kk = 0;
+        while kk < n {
+            let k_max = (kk + bs).min(n);
+            let mut jj = 0;
+            while jj < n {
+                let j_max = (jj + bs).min(n);
+                for i in ii..i_max {
+                    for k in kk..k_max {
+                        let a_ik = a[i * n + k];
+                        let row = i * n;
+                        let col = k * n;
+                        for j in jj..j_max {
+                            c[row + j] += a_ik * b[col + j];
+                        }
+                    }
+                }
+                jj += bs;
+            }
+            kk += bs;
+        }
+        ii += bs;
+    }
+}
+
+/// Naive matrix multiplication - O(n^3)
+#[wasm_bindgen]
+pub fn matrix_multiply(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
+    if n == 0 {
+        return;
+    }
+    if n <= BLOCK_THRESHOLD {
+        matrix_multiply_naive(a, b, c, n);
+    } else {
+        matrix_multiply_blocked(a, b, c, n, BLOCK_SIZE);
+    }
+}
+
 /// Strassen matrix multiplication - O(n^2.807)
-/// More efficient for large matrices (n >= 128, power of two)
+/// More efficient for large matrices (power of two, threshold tuned)
 /// Uses divide-and-conquer with 7 multiplications instead of 8
 #[wasm_bindgen]
 pub fn matrix_multiply_strassen(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
     if n == 0 {
         return;
     }
+    let threshold = strassen_threshold();
     
     // For small matrices, use naive algorithm (threshold tuned for WASM)
-    if n <= STRASSEN_THRESHOLD {
+    if n <= threshold {
         matrix_multiply(a, b, c, n);
         return;
     }
@@ -275,36 +512,50 @@ pub fn matrix_multiply_strassen(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
         return;
     }
     
-    strassen_recursive(a, b, c, n);
+    let workspace_len = workspace_required(n, threshold);
+    let mut workspace = Workspace::with_capacity(workspace_len);
+    strassen_recursive_ws(a, b, c, n, &mut workspace, threshold);
 }
 
-fn strassen_recursive(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
-    if n <= STRASSEN_THRESHOLD {
-        // Base case: use naive multiplication
-        for i in 0..n {
-            for j in 0..n {
-                let mut sum = 0.0;
-                for k in 0..n {
-                    sum += a[i * n + k] * b[k * n + j];
-                }
-                c[i * n + j] = sum;
-            }
-        }
+fn workspace_required(n: usize, threshold: usize) -> usize {
+    if n <= threshold {
+        return 0;
+    }
+    let half = n / 2;
+    let size = half * half;
+    let level = size * 17;
+    level + workspace_required(half, threshold)
+}
+
+fn strassen_recursive_ws(a: &[f64], b: &[f64], c: &mut [f64], n: usize, workspace: &mut Workspace, threshold: usize) {
+    if n <= threshold {
+        // Base case: use naive multiplication (avoid extra blocking overhead)
+        matrix_multiply_naive(a, b, c, n);
         return;
     }
     
+    let mark = workspace.mark();
     let half = n / 2;
     let size = half * half;
     
     // Allocate submatrices
-    let mut a11 = vec![0.0; size];
-    let mut a12 = vec![0.0; size];
-    let mut a21 = vec![0.0; size];
-    let mut a22 = vec![0.0; size];
-    let mut b11 = vec![0.0; size];
-    let mut b12 = vec![0.0; size];
-    let mut b21 = vec![0.0; size];
-    let mut b22 = vec![0.0; size];
+    let a11_ptr = workspace.alloc_ptr(size);
+    let a12_ptr = workspace.alloc_ptr(size);
+    let a21_ptr = workspace.alloc_ptr(size);
+    let a22_ptr = workspace.alloc_ptr(size);
+    let b11_ptr = workspace.alloc_ptr(size);
+    let b12_ptr = workspace.alloc_ptr(size);
+    let b21_ptr = workspace.alloc_ptr(size);
+    let b22_ptr = workspace.alloc_ptr(size);
+
+    let a11 = unsafe { std::slice::from_raw_parts_mut(a11_ptr, size) };
+    let a12 = unsafe { std::slice::from_raw_parts_mut(a12_ptr, size) };
+    let a21 = unsafe { std::slice::from_raw_parts_mut(a21_ptr, size) };
+    let a22 = unsafe { std::slice::from_raw_parts_mut(a22_ptr, size) };
+    let b11 = unsafe { std::slice::from_raw_parts_mut(b11_ptr, size) };
+    let b12 = unsafe { std::slice::from_raw_parts_mut(b12_ptr, size) };
+    let b21 = unsafe { std::slice::from_raw_parts_mut(b21_ptr, size) };
+    let b22 = unsafe { std::slice::from_raw_parts_mut(b22_ptr, size) };
     
     // Split matrices
     for i in 0..half {
@@ -322,47 +573,58 @@ fn strassen_recursive(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
     }
     
     // Strassen's 7 products
-    let mut m1 = vec![0.0; size];
-    let mut m2 = vec![0.0; size];
-    let mut m3 = vec![0.0; size];
-    let mut m4 = vec![0.0; size];
-    let mut m5 = vec![0.0; size];
-    let mut m6 = vec![0.0; size];
-    let mut m7 = vec![0.0; size];
+    let m1_ptr = workspace.alloc_ptr(size);
+    let m2_ptr = workspace.alloc_ptr(size);
+    let m3_ptr = workspace.alloc_ptr(size);
+    let m4_ptr = workspace.alloc_ptr(size);
+    let m5_ptr = workspace.alloc_ptr(size);
+    let m6_ptr = workspace.alloc_ptr(size);
+    let m7_ptr = workspace.alloc_ptr(size);
     
-    let mut temp1 = vec![0.0; size];
-    let mut temp2 = vec![0.0; size];
+    let temp1_ptr = workspace.alloc_ptr(size);
+    let temp2_ptr = workspace.alloc_ptr(size);
+
+    let m1 = unsafe { std::slice::from_raw_parts_mut(m1_ptr, size) };
+    let m2 = unsafe { std::slice::from_raw_parts_mut(m2_ptr, size) };
+    let m3 = unsafe { std::slice::from_raw_parts_mut(m3_ptr, size) };
+    let m4 = unsafe { std::slice::from_raw_parts_mut(m4_ptr, size) };
+    let m5 = unsafe { std::slice::from_raw_parts_mut(m5_ptr, size) };
+    let m6 = unsafe { std::slice::from_raw_parts_mut(m6_ptr, size) };
+    let m7 = unsafe { std::slice::from_raw_parts_mut(m7_ptr, size) };
+    
+    let temp1 = unsafe { std::slice::from_raw_parts_mut(temp1_ptr, size) };
+    let temp2 = unsafe { std::slice::from_raw_parts_mut(temp2_ptr, size) };
     
     // M1 = (A11 + A22) * (B11 + B22)
-    matrix_add(&a11, &a22, &mut temp1, half);
-    matrix_add(&b11, &b22, &mut temp2, half);
-    strassen_recursive(&temp1, &temp2, &mut m1, half);
+    matrix_add(a11, a22, temp1, half);
+    matrix_add(b11, b22, temp2, half);
+    strassen_recursive_ws(temp1, temp2, m1, half, workspace, threshold);
     
     // M2 = (A21 + A22) * B11
-    matrix_add(&a21, &a22, &mut temp1, half);
-    strassen_recursive(&temp1, &b11, &mut m2, half);
+    matrix_add(a21, a22, temp1, half);
+    strassen_recursive_ws(temp1, b11, m2, half, workspace, threshold);
     
     // M3 = A11 * (B12 - B22)
-    matrix_sub(&b12, &b22, &mut temp1, half);
-    strassen_recursive(&a11, &temp1, &mut m3, half);
+    matrix_sub(b12, b22, temp1, half);
+    strassen_recursive_ws(a11, temp1, m3, half, workspace, threshold);
     
     // M4 = A22 * (B21 - B11)
-    matrix_sub(&b21, &b11, &mut temp1, half);
-    strassen_recursive(&a22, &temp1, &mut m4, half);
+    matrix_sub(b21, b11, temp1, half);
+    strassen_recursive_ws(a22, temp1, m4, half, workspace, threshold);
     
     // M5 = (A11 + A12) * B22
-    matrix_add(&a11, &a12, &mut temp1, half);
-    strassen_recursive(&temp1, &b22, &mut m5, half);
+    matrix_add(a11, a12, temp1, half);
+    strassen_recursive_ws(temp1, b22, m5, half, workspace, threshold);
     
     // M6 = (A21 - A11) * (B11 + B12)
-    matrix_sub(&a21, &a11, &mut temp1, half);
-    matrix_add(&b11, &b12, &mut temp2, half);
-    strassen_recursive(&temp1, &temp2, &mut m6, half);
+    matrix_sub(a21, a11, temp1, half);
+    matrix_add(b11, b12, temp2, half);
+    strassen_recursive_ws(temp1, temp2, m6, half, workspace, threshold);
     
     // M7 = (A12 - A22) * (B21 + B22)
-    matrix_sub(&a12, &a22, &mut temp1, half);
-    matrix_add(&b21, &b22, &mut temp2, half);
-    strassen_recursive(&temp1, &temp2, &mut m7, half);
+    matrix_sub(a12, a22, temp1, half);
+    matrix_add(b21, b22, temp2, half);
+    strassen_recursive_ws(temp1, temp2, m7, half, workspace, threshold);
     
     // Combine results
     // C11 = M1 + M4 - M5 + M7
@@ -378,6 +640,8 @@ fn strassen_recursive(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
             c[(i + half) * n + (j + half)] = m1[idx] - m2[idx] + m3[idx] + m6[idx];
         }
     }
+
+    workspace.reset(mark);
 }
 
 fn matrix_add(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
@@ -419,7 +683,7 @@ pub fn quicksort(arr: &mut [f64]) {
     if arr.len() <= 1 {
         return;
     }
-    quicksort_impl(arr, 0, arr.len() - 1);
+    quicksort_iter(arr);
 }
 
 #[wasm_bindgen]
@@ -428,14 +692,27 @@ pub fn quicksort_ptr(ptr: *mut f64, len: usize) {
     quicksort(arr);
 }
 
-fn quicksort_impl(arr: &mut [f64], low: usize, high: usize) {
-    if low < high {
-        let pivot = partition(arr, low, high);
-        if pivot > 0 {
-            quicksort_impl(arr, low, pivot - 1);
+thread_local! {
+    static QS_STACK: RefCell<Vec<(usize, usize)>> = RefCell::new(Vec::new());
+}
+
+fn quicksort_iter(arr: &mut [f64]) {
+    QS_STACK.with(|stack_cell| {
+        let mut stack = stack_cell.borrow_mut();
+        stack.clear();
+        stack.push((0, arr.len() - 1));
+
+        while let Some((low, high)) = stack.pop() {
+            if low >= high {
+                continue;
+            }
+            let pivot = partition(arr, low, high);
+            if pivot > 0 {
+                stack.push((low, pivot - 1));
+            }
+            stack.push((pivot + 1, high));
         }
-        quicksort_impl(arr, pivot + 1, high);
-    }
+    });
 }
 
 fn partition(arr: &mut [f64], low: usize, high: usize) -> usize {
