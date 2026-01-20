@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "predev": "node scripts/maybe-build-wasm.mjs",
+    "predev:shared": "cross-env WASM_SHARED=1 node scripts/maybe-build-wasm.mjs",
     "dev": "next dev --webpack",
+    "dev:shared": "next dev --webpack",
     "prebuild": "node scripts/maybe-build-wasm.mjs",
     "build": "next build --webpack",
     "start": "next start",

@@ -10,6 +10,16 @@ const sharedRustFlags = [
   'link-arg=--shared-memory',
   '-C',
   'link-arg=--max-memory=1073741824',
+  '-C',
+  'link-arg=--import-memory',
+  '-C',
+  'link-arg=--export=__wasm_init_tls',
+  '-C',
+  'link-arg=--export=__tls_base',
+  '-C',
+  'link-arg=--export=__tls_size',
+  '-C',
+  'link-arg=--export=__tls_align',
   '-Z',
   'unstable-options',
   '-C',
@@ -30,13 +40,6 @@ const run = (cmd, args, envOverrides = {}) => {
   }
 };
 
-const supportsSharedMemory = () => {
-  const result = spawnSync('wasm-bindgen', ['--help'], { encoding: 'utf8', shell: true });
-  if (result.status !== 0) {
-    return false;
-  }
-  return typeof result.stdout === 'string' && result.stdout.includes('--shared-memory');
-};
 
 const crateDir = join(process.cwd(), 'crates', 'wasm');
 const outDir = join(process.cwd(), '.wasm', 'pkg');
@@ -82,14 +85,6 @@ const bindgenArgs = [
   '--out-name',
   'wasm_lib',
 ];
-if (isShared) {
-  if (!supportsSharedMemory()) {
-    console.error('[wasm] wasm-bindgen CLI does not support --shared-memory.');
-    console.error('[wasm] Update CLI: cargo install -f wasm-bindgen-cli --version 0.2.108');
-    process.exit(1);
-  }
-  bindgenArgs.push('--shared-memory');
-}
 bindgenArgs.push(wasmPath);
 run('wasm-bindgen', bindgenArgs);
 
