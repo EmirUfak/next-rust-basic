@@ -56,8 +56,8 @@ export type WorkerResponse =
   // Fibonacci results
   | { type: 'fibonacciResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number }
   | { type: 'fibonacciIterResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: bigint }
-  | { type: 'fibonacciBatchResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number; iterations: number }
-  | { type: 'fibonacciBatchJsResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number; iterations: number }
+  | { type: 'fibonacciBatchResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number; iterations: number; durationMs: number }
+  | { type: 'fibonacciBatchJsResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: number; iterations: number; durationMs: number }
   | { type: 'fibonacciIterBatchResult'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; result: bigint; iterations: number }
   // SharedArrayBuffer results
   | { type: 'sharedMemoryReady'; requestId: string; version: typeof WORKER_PROTOCOL_VERSION; available: boolean; buffer?: SharedArrayBuffer; ptr?: number; length?: number }

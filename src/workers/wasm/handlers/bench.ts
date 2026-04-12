@@ -127,31 +127,37 @@ export const handleBenchMessage = async (
     }
 
     case 'fibonacciBatch': {
+      const start = performance.now();
       let result = 0;
       for (let i = 0; i < message.iterations; i += 1) {
         result = fibonacci(message.n);
       }
+      const durationMs = performance.now() - start;
       deps.postMessageSafe({
         type: 'fibonacciBatchResult',
         requestId: message.requestId,
         version: WORKER_PROTOCOL_VERSION,
         result,
         iterations: message.iterations,
+        durationMs,
       });
       return true;
     }
 
     case 'fibonacciBatchJs': {
+      const start = performance.now();
       let result = 0;
       for (let i = 0; i < message.iterations; i += 1) {
         result = fibonacciJS(message.n);
       }
+      const durationMs = performance.now() - start;
       deps.postMessageSafe({
         type: 'fibonacciBatchJsResult',
         requestId: message.requestId,
         version: WORKER_PROTOCOL_VERSION,
         result,
         iterations: message.iterations,
+        durationMs,
       });
       return true;
     }

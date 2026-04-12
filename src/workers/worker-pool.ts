@@ -5,22 +5,25 @@ import {
   type WorkerResponse,
 } from './worker-messages';
 
+interface PendingRequest {
+  resolve: (value: WorkerResponse) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
 interface WorkerEntry {
   worker: Worker;
-  pending: Map<
-    string,
-    {
-      resolve: (value: WorkerResponse) => void;
-      reject: (error: Error) => void;
-    }
-  >;
+  pending: Map<string, PendingRequest>;
 }
 
 export class WorkerPool {
   private readonly entries: WorkerEntry[] = [];
   private nextIndex = 0;
 
-  constructor(private readonly size: number) {}
+  constructor(
+    private readonly size: number,
+    private readonly requestTimeoutMs = 30_000
+  ) {}
 
   async init(createWorker: () => Worker): Promise<void> {
     const targets = Array.from({ length: this.size }, () => {
@@ -38,6 +41,8 @@ export class WorkerPool {
 
         if (!handler) return;
 
+        clearTimeout(handler.timeoutId);
+
         if (message.type === 'error') {
           handler.reject(new Error(message.message));
         } else {
@@ -48,10 +53,7 @@ export class WorkerPool {
       };
 
       worker.onerror = (event) => {
-        entry.pending.forEach(({ reject }, requestId) => {
-          entry.pending.delete(requestId);
-          reject(new Error(event.message ?? 'Worker error'));
-        });
+        this.rejectAllPending(entry, event.message ?? 'Worker error');
       };
 
       this.entries.push(entry);
@@ -67,7 +69,10 @@ export class WorkerPool {
   }
 
   terminate(): void {
-    this.entries.forEach(({ worker }) => worker.terminate());
+    this.entries.forEach((entry) => {
+      this.rejectAllPending(entry, 'Worker pool terminated');
+      entry.worker.terminate();
+    });
     this.entries.length = 0;
   }
 
@@ -93,8 +98,40 @@ export class WorkerPool {
 
   private post(entry: WorkerEntry, request: WorkerRequest): Promise<WorkerResponse> {
     return new Promise<WorkerResponse>((resolve, reject) => {
-      entry.pending.set(request.requestId, { resolve, reject });
-      entry.worker.postMessage(request);
+      const timeoutId = setTimeout(() => {
+        const pending = entry.pending.get(request.requestId);
+        if (!pending) {
+          return;
+        }
+        entry.pending.delete(request.requestId);
+        pending.reject(
+          new Error(
+            `Worker request timed out after ${this.requestTimeoutMs}ms (${request.type})`
+          )
+        );
+      }, this.requestTimeoutMs);
+
+      entry.pending.set(request.requestId, { resolve, reject, timeoutId });
+
+      try {
+        entry.worker.postMessage(request);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        entry.pending.delete(request.requestId);
+        reject(
+          error instanceof Error
+            ? error
+            : new Error('Failed to post message to worker')
+        );
+      }
+    });
+  }
+
+  private rejectAllPending(entry: WorkerEntry, message: string): void {
+    entry.pending.forEach((pending, requestId) => {
+      clearTimeout(pending.timeoutId);
+      pending.reject(new Error(message));
+      entry.pending.delete(requestId);
     });
   }
 

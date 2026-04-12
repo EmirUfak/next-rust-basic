@@ -162,7 +162,6 @@ export default function Demo() {
 
     try {
       // Run JS in worker
-      const jsStart = performance.now();
       const jsMessage = await postRequest({
         type: 'fibonacciBatchJs',
         requestId: createRequestId(),
@@ -171,14 +170,12 @@ export default function Demo() {
         iterations: fibIterations,
       });
 
-      const jsEnd = performance.now();
       if (jsMessage.type === 'fibonacciBatchJsResult') {
-        setFibJsTime(jsEnd - jsStart);
+        setFibJsTime(jsMessage.durationMs);
         setFibJsResult(jsMessage.result);
       }
 
       // Run WASM in worker
-      const wasmStart = performance.now();
       const wasmMessage = await postRequest({
         type: 'fibonacciBatch',
         requestId: createRequestId(),
@@ -186,9 +183,8 @@ export default function Demo() {
         n: fibN,
         iterations: fibIterations,
       });
-      const wasmEnd = performance.now();
       if (wasmMessage.type === 'fibonacciBatchResult') {
-        setFibWasmTime(wasmEnd - wasmStart);
+        setFibWasmTime(wasmMessage.durationMs);
         setFibWasmResult(wasmMessage.result);
       }
     } catch (error) {
@@ -540,7 +536,7 @@ export default function Demo() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
           {/* Fibonacci Benchmark - Fixed Height */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-90 flex flex-col">
             <h2 className="text-xl font-bold text-blue-600 mb-1 flex items-center gap-2">
               Fibonacci Benchmark
             </h2>
@@ -592,7 +588,7 @@ export default function Demo() {
           </div>
 
           {/* Matrix Multiplication - Fixed Height */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-90 flex flex-col">
             <h2 className="text-xl font-bold text-red-500 mb-1 flex items-center gap-2">
               Matrix Multiplication
             </h2>
@@ -648,7 +644,7 @@ export default function Demo() {
           </div>
 
           {/* Array Sorting - Fixed Height */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-90 flex flex-col">
             <h2 className="text-xl font-bold text-purple-600 mb-1 flex items-center gap-2">
               Array Sorting (Quicksort)
             </h2>
@@ -689,7 +685,7 @@ export default function Demo() {
           </div>
 
           {/* SharedArrayBuffer Demo - Fixed Height */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-[360px] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100 h-90 flex flex-col">
             <h2 className="text-xl font-bold text-teal-600 mb-1 flex items-center gap-2">
               SharedArrayBuffer Demo
             </h2>
