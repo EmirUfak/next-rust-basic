@@ -68,9 +68,10 @@ pub fn free_f64(ptr: *mut f64, len: usize) {
         return;
     }
     // SAFETY: `ptr` must come from `alloc_f64(len)` with the exact same `len`.
-    // Rebuilding the Vec lets Rust deallocate with the original allocator.
+    // Length is set to 0 because this allocation may not be fully initialized.
+    // Rebuilding the Vec with original capacity lets Rust deallocate correctly.
     unsafe {
-        let _ = Vec::from_raw_parts(ptr, len, len);
+        let _ = Vec::from_raw_parts(ptr, 0, len);
     }
 }
 
@@ -90,9 +91,10 @@ pub fn free_u32(ptr: *mut u32, len: usize) {
         return;
     }
     // SAFETY: `ptr` must come from `alloc_u32(len)` with the exact same `len`.
-    // Rebuilding the Vec lets Rust deallocate with the original allocator.
+    // Length is set to 0 because this allocation may not be fully initialized.
+    // Rebuilding the Vec with original capacity lets Rust deallocate correctly.
     unsafe {
-        let _ = Vec::from_raw_parts(ptr, len, len);
+        let _ = Vec::from_raw_parts(ptr, 0, len);
     }
 }
 
