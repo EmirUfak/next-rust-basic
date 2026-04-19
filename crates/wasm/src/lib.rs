@@ -137,19 +137,19 @@ pub fn sum_f32_simd(arr: &[f32]) -> f32 {
 fn sum_f32_fallback(arr: &[f32]) -> f32 {
     let chunks = arr.chunks_exact(4);
     let remainder = chunks.remainder();
-    
+
     let mut sum0 = 0.0f32;
     let mut sum1 = 0.0f32;
     let mut sum2 = 0.0f32;
     let mut sum3 = 0.0f32;
-    
+
     for chunk in chunks {
         sum0 += chunk[0];
         sum1 += chunk[1];
         sum2 += chunk[2];
         sum3 += chunk[3];
     }
-    
+
     let mut total = sum0 + sum1 + sum2 + sum3;
     for &val in remainder {
         total += val;
@@ -199,24 +199,24 @@ fn dot_product_fallback(a: &[f32], b: &[f32]) -> f32 {
     let len = a.len().min(b.len());
     let a = &a[..len];
     let b = &b[..len];
-    
+
     let mut sum0 = 0.0f32;
     let mut sum1 = 0.0f32;
     let mut sum2 = 0.0f32;
     let mut sum3 = 0.0f32;
-    
+
     let chunks_a = a.chunks_exact(4);
     let chunks_b = b.chunks_exact(4);
     let remainder_a = chunks_a.remainder();
     let remainder_b = chunks_b.remainder();
-    
+
     for (ca, cb) in chunks_a.zip(chunks_b) {
         sum0 += ca[0] * cb[0];
         sum1 += ca[1] * cb[1];
         sum2 += ca[2] * cb[2];
         sum3 += ca[3] * cb[3];
     }
-    
+
     let mut total = sum0 + sum1 + sum2 + sum3;
     for (&va, &vb) in remainder_a.iter().zip(remainder_b.iter()) {
         total += va * vb;
@@ -521,20 +521,20 @@ pub fn matrix_multiply_strassen(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
         return;
     }
     let threshold = strassen_threshold();
-    
+
     // For small matrices, use naive algorithm (threshold tuned for WASM)
     if n <= threshold {
         matrix_multiply(a, b, c, n);
         return;
     }
-    
+
     // Ensure n is power of 2 for Strassen
     if !is_power_of_two(n) {
         // Pad matrices and use naive for non-power-of-2
         matrix_multiply(a, b, c, n);
         return;
     }
-    
+
     let workspace_len = workspace_required(n, threshold);
     let mut workspace = Workspace::with_capacity(workspace_len);
     if strassen_recursive_ws(a, b, c, n, &mut workspace, threshold).is_err() {
@@ -573,14 +573,30 @@ fn strassen_recursive_ws(
         let size = half * half;
 
         // Allocate submatrices.
-        let a11_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let a12_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let a21_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let a22_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let b11_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let b12_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let b21_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let b22_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
+        let a11_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let a12_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let a21_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let a22_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let b11_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let b12_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let b21_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let b22_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
 
         // SAFETY: All pointers come from `workspace.alloc_ptr(size)` in this frame,
         // are unique non-overlapping regions, and `size` matches allocation length.
@@ -616,16 +632,34 @@ fn strassen_recursive_ws(
         }
 
         // Strassen's 7 products.
-        let m1_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let m2_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let m3_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let m4_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let m5_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let m6_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let m7_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
+        let m1_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let m2_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let m3_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let m4_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let m5_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let m6_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let m7_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
 
-        let temp1_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
-        let temp2_ptr = workspace.alloc_ptr(size).ok_or("workspace capacity exceeded")?;
+        let temp1_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
+        let temp2_ptr = workspace
+            .alloc_ptr(size)
+            .ok_or("workspace capacity exceeded")?;
 
         // SAFETY: All regions were allocated from workspace with identical `size` and
         // are uniquely owned by this recursion frame.
@@ -730,7 +764,12 @@ pub fn matrix_multiply_ptr(a_ptr: *const f64, b_ptr: *const f64, c_ptr: *mut f64
 }
 
 #[wasm_bindgen]
-pub fn matrix_multiply_strassen_ptr(a_ptr: *const f64, b_ptr: *const f64, c_ptr: *mut f64, n: usize) {
+pub fn matrix_multiply_strassen_ptr(
+    a_ptr: *const f64,
+    b_ptr: *const f64,
+    c_ptr: *mut f64,
+    n: usize,
+) {
     if n == 0 || a_ptr.is_null() || b_ptr.is_null() || c_ptr.is_null() {
         return;
     }
@@ -802,4 +841,3 @@ fn partition(arr: &mut [f64], low: usize, high: usize) -> usize {
     arr.swap(i, high);
     i
 }
-
