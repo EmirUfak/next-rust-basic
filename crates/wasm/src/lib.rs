@@ -9,6 +9,7 @@ use wasm_bindgen::prelude::*;
 /// Recursive fibonacci - O(2^n) complexity
 /// Kept for benchmark comparison purposes
 #[wasm_bindgen]
+#[must_use]
 pub fn fibonacci(n: u32) -> u32 {
     match n {
         0 => 0,
@@ -20,6 +21,7 @@ pub fn fibonacci(n: u32) -> u32 {
 /// Iterative fibonacci - O(n) complexity
 /// ~1000x faster than recursive for n=40
 #[wasm_bindgen]
+#[must_use]
 pub fn fibonacci_iter(n: u32) -> u64 {
     if n == 0 {
         return 0;
@@ -51,6 +53,7 @@ fn fibonacci_iter_u32(n: u32) -> u32 {
 // ============================================================================
 
 #[wasm_bindgen]
+#[must_use]
 pub fn alloc_f64(len: usize) -> *mut f64 {
     let mut buf = Vec::<f64>::with_capacity(len);
     let ptr = buf.as_mut_ptr();
@@ -59,6 +62,7 @@ pub fn alloc_f64(len: usize) -> *mut f64 {
 }
 
 #[wasm_bindgen]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn free_f64(ptr: *mut f64, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -71,6 +75,7 @@ pub fn free_f64(ptr: *mut f64, len: usize) {
 }
 
 #[wasm_bindgen]
+#[must_use]
 pub fn alloc_u32(len: usize) -> *mut u32 {
     let mut buf = Vec::<u32>::with_capacity(len);
     let ptr = buf.as_mut_ptr();
@@ -79,6 +84,7 @@ pub fn alloc_u32(len: usize) -> *mut u32 {
 }
 
 #[wasm_bindgen]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn free_u32(ptr: *mut u32, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -102,6 +108,7 @@ pub fn process_shared_buffer(arr: &mut [u32]) {
 }
 
 #[wasm_bindgen]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn process_shared_buffer_ptr(ptr: *mut u32, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -113,11 +120,13 @@ pub fn process_shared_buffer_ptr(ptr: *mut u32, len: usize) {
 }
 
 #[wasm_bindgen]
+#[must_use]
 pub fn sum_u32(arr: &[u32]) -> u32 {
     arr.iter().copied().sum()
 }
 
 #[wasm_bindgen]
+#[must_use]
 pub fn sum_u32_sab(arr: &[u32]) -> u32 {
     arr.iter().copied().sum()
 }
@@ -125,6 +134,7 @@ pub fn sum_u32_sab(arr: &[u32]) -> u32 {
 /// SIMD-style sum for f32 arrays using loop unrolling
 /// Manual unrolling mimics SIMD behavior for better performance
 #[wasm_bindgen]
+#[must_use]
 pub fn sum_f32_simd(arr: &[f32]) -> f32 {
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     // SAFETY: The SIMD helper only reads within slice bounds and handles remainder safely.
@@ -186,6 +196,7 @@ unsafe fn sum_f32_simd128(arr: &[f32]) -> f32 {
 /// SIMD-style dot product using loop unrolling
 /// 4-way parallel accumulation for better CPU pipeline utilization
 #[wasm_bindgen]
+#[must_use]
 pub fn dot_product_simd(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     // SAFETY: The SIMD helper clamps to the minimum input length and handles remainder safely.
@@ -274,10 +285,9 @@ pub fn grayscale(data: &mut [u8]) {
 
 fn grayscale_scalar(data: &mut [u8]) {
     for chunk in data.chunks_exact_mut(4) {
-        let r = chunk[0] as f32;
-        let g = chunk[1] as f32;
-        let b = chunk[2] as f32;
-        let gray = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
+        let weighted =
+            77 * u32::from(chunk[0]) + 150 * u32::from(chunk[1]) + 29 * u32::from(chunk[2]) + 128;
+        let gray = (weighted >> 8).to_le_bytes()[0];
         chunk[0] = gray;
         chunk[1] = gray;
         chunk[2] = gray;
@@ -296,7 +306,7 @@ unsafe fn grayscale_simd128(data: &mut [u8]) {
     let pixels_ptr = data.as_mut_ptr() as *mut u32;
 
     let mask = i32x4_splat(0xFF);
-    let alpha_mask = i32x4_splat(0xFF000000u32 as i32);
+    let alpha_mask = i32x4_splat(-16_777_216);
     let weight_r = i32x4_splat(77);
     let weight_g = i32x4_splat(150);
     let weight_b = i32x4_splat(29);
@@ -328,36 +338,51 @@ unsafe fn grayscale_simd128(data: &mut [u8]) {
 
 #[wasm_bindgen]
 pub fn box_blur(data: &mut [u8], width: u32, height: u32, radius: u32) {
-    let w = width as usize;
-    let h = height as usize;
-    let r = radius as i32;
-    let mut output = vec![0u8; data.len()];
+    let w = usize::try_from(width).unwrap_or(usize::MAX);
+    let h = usize::try_from(height).unwrap_or(usize::MAX);
+    let r = usize::try_from(radius).unwrap_or(usize::MAX);
+    if w == 0 || h == 0 {
+        return;
+    }
+
+    let Some(pixel_bytes) = w.checked_mul(h).and_then(|pixels| pixels.checked_mul(4)) else {
+        return;
+    };
+    if data.len() < pixel_bytes {
+        return;
+    }
+
+    let mut output = data.to_vec();
 
     for y in 0..h {
+        let y_start = y.saturating_sub(r);
+        let y_end = (y + r).min(h - 1);
         for x in 0..w {
+            let x_start = x.saturating_sub(r);
+            let x_end = (x + r).min(w - 1);
             let mut sum_r = 0u32;
             let mut sum_g = 0u32;
             let mut sum_b = 0u32;
             let mut count = 0u32;
 
-            for dy in -r..=r {
-                for dx in -r..=r {
-                    let nx = x as i32 + dx;
-                    let ny = y as i32 + dy;
-                    if nx >= 0 && nx < w as i32 && ny >= 0 && ny < h as i32 {
-                        let idx = ((ny as usize) * w + (nx as usize)) * 4;
-                        sum_r += data[idx] as u32;
-                        sum_g += data[idx + 1] as u32;
-                        sum_b += data[idx + 2] as u32;
-                        count += 1;
-                    }
+            for ny in y_start..=y_end {
+                for nx in x_start..=x_end {
+                    let idx = (ny * w + nx) * 4;
+                    sum_r += u32::from(data[idx]);
+                    sum_g += u32::from(data[idx + 1]);
+                    sum_b += u32::from(data[idx + 2]);
+                    count += 1;
                 }
             }
 
             let idx = (y * w + x) * 4;
-            output[idx] = (sum_r / count) as u8;
-            output[idx + 1] = (sum_g / count) as u8;
-            output[idx + 2] = (sum_b / count) as u8;
+            let avg_r = sum_r / count;
+            let avg_g = sum_g / count;
+            let avg_b = sum_b / count;
+
+            output[idx] = u8::try_from(avg_r).unwrap_or(u8::MAX);
+            output[idx + 1] = u8::try_from(avg_g).unwrap_or(u8::MAX);
+            output[idx + 2] = u8::try_from(avg_b).unwrap_or(u8::MAX);
             output[idx + 3] = data[idx + 3];
         }
     }
@@ -371,26 +396,44 @@ pub fn box_blur(data: &mut [u8], width: u32, height: u32, radius: u32) {
 
 #[wasm_bindgen]
 pub fn fft_demo(input: &[f64], output: &mut [f64]) {
-    let n = input.len();
-    for k in 0..n {
+    let n = input.len().min(output.len());
+    if n == 0 {
+        return;
+    }
+
+    let n_f64 = usize_to_f64(n);
+    for (k, out) in output.iter_mut().take(n).enumerate() {
+        let k_f64 = usize_to_f64(k);
         let mut sum = 0.0;
-        for t in 0..n {
-            let angle = 2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
-            sum += input[t] * angle.cos();
+        for (t, &sample) in input.iter().take(n).enumerate() {
+            let angle = 2.0 * std::f64::consts::PI * k_f64 * usize_to_f64(t) / n_f64;
+            sum += sample * angle.cos();
         }
-        output[k] = sum.abs();
+        *out = sum.abs();
     }
 }
 
 #[wasm_bindgen]
 pub fn generate_signal(buffer: &mut [f64], freq1: f64, freq2: f64, freq3: f64) {
     let n = buffer.len();
-    for i in 0..n {
-        let t = i as f64 / n as f64;
-        buffer[i] = (2.0 * std::f64::consts::PI * freq1 * t).sin()
+    if n == 0 {
+        return;
+    }
+
+    let n_f64 = usize_to_f64(n);
+    for (i, sample) in buffer.iter_mut().enumerate() {
+        let t = usize_to_f64(i) / n_f64;
+        *sample = (2.0 * std::f64::consts::PI * freq1 * t).sin()
             + 0.5 * (2.0 * std::f64::consts::PI * freq2 * t).sin()
             + 0.3 * (2.0 * std::f64::consts::PI * freq3 * t).sin();
     }
+}
+
+fn usize_to_f64(value: usize) -> f64 {
+    let Ok(converted) = u32::try_from(value) else {
+        return f64::from(u32::MAX);
+    };
+    f64::from(converted)
 }
 
 // ============================================================================
@@ -405,7 +448,7 @@ const BLOCK_THRESHOLD: usize = 512;
 static STRASSEN_THRESHOLD: AtomicUsize = AtomicUsize::new(128);
 
 fn is_power_of_two(n: usize) -> bool {
-    n != 0 && (n & (n - 1)) == 0
+    n.is_power_of_two()
 }
 
 #[wasm_bindgen]
@@ -553,6 +596,7 @@ fn workspace_required(n: usize, threshold: usize) -> usize {
     level + workspace_required(half, threshold)
 }
 
+#[allow(clippy::too_many_lines)]
 fn strassen_recursive_ws(
     a: &[f64],
     b: &[f64],
@@ -748,6 +792,7 @@ fn matrix_sub(a: &[f64], b: &[f64], c: &mut [f64], n: usize) {
 }
 
 #[wasm_bindgen]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn matrix_multiply_ptr(a_ptr: *const f64, b_ptr: *const f64, c_ptr: *mut f64, n: usize) {
     if n == 0 || a_ptr.is_null() || b_ptr.is_null() || c_ptr.is_null() {
         return;
@@ -764,6 +809,7 @@ pub fn matrix_multiply_ptr(a_ptr: *const f64, b_ptr: *const f64, c_ptr: *mut f64
 }
 
 #[wasm_bindgen]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn matrix_multiply_strassen_ptr(
     a_ptr: *const f64,
     b_ptr: *const f64,
@@ -797,6 +843,7 @@ pub fn quicksort(arr: &mut [f64]) {
 }
 
 #[wasm_bindgen]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn quicksort_ptr(ptr: *mut f64, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -807,7 +854,7 @@ pub fn quicksort_ptr(ptr: *mut f64, len: usize) {
 }
 
 thread_local! {
-    static QS_STACK: RefCell<Vec<(usize, usize)>> = RefCell::new(Vec::new());
+    static QS_STACK: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
 }
 
 fn quicksort_iter(arr: &mut [f64]) {
