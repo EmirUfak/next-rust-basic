@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  WORKER_REQUEST_TYPES,
+  WORKER_RESPONSE_TYPES,
   WORKER_PROTOCOL_VERSION,
   isWorkerRequest,
   isWorkerResponse,
@@ -26,6 +28,20 @@ describe('worker message contracts', () => {
     };
 
     expect(isWorkerResponse(message)).toBe(true);
+  });
+
+  it('keeps runtime request validator in sync with exported request types', () => {
+    expect(WORKER_REQUEST_TYPES).toContain('matrixMultiplyWasmBench');
+    expect(WORKER_REQUEST_TYPES).toContain('sharedMemoryProcess');
+  });
+
+  it('keeps runtime response validator in sync with exported response types', () => {
+    expect(WORKER_RESPONSE_TYPES).toContain('warmup');
+    expect(isWorkerResponse({
+      type: 'warmup',
+      requestId: 'req-warmup',
+      version: WORKER_PROTOCOL_VERSION,
+    })).toBe(true);
   });
 
   it('rejects invalid version', () => {

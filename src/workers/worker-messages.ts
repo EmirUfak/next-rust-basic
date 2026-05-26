@@ -94,13 +94,15 @@ export type WorkerResponse =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
-const validRequestTypes = new Set([
+export const WORKER_REQUEST_TYPES = [
   'ping', 'warmup', 'fibonacci', 'fibonacciIter', 'fibonacciBatch', 'fibonacciBatchJs', 'fibonacciIterBatch',
   'sharedMemoryInit', 'sharedMemoryProcess', 'sharedBufferProcess', 'sumArray', 'sumArraySab', 'dotProductSimd', 'sumF32Simd',
   'grayscale', 'boxBlur', 'fftDemo', 'generateSignal',
   'matrixMultiply', 'matrixMultiplyJs', 'matrixMultiplyStrassen', 'matrixMultiplyJsBench', 'matrixMultiplyWasmBench',
   'quicksort', 'quicksortJs', 'quicksortJsBench', 'quicksortWasmBench'
-]);
+] as const;
+
+const validRequestTypes: ReadonlySet<string> = new Set(WORKER_REQUEST_TYPES);
 
 export const isWorkerRequest = (value: unknown): value is WorkerRequest => {
   if (!isRecord(value) || value.version !== WORKER_PROTOCOL_VERSION) return false;
@@ -109,15 +111,17 @@ export const isWorkerRequest = (value: unknown): value is WorkerRequest => {
   return true;
 };
 
-const validResponseTypes = new Set([
-  'ready', 'warmupDone', 'error',
+export const WORKER_RESPONSE_TYPES = [
+  'warmup', 'ready', 'warmupDone', 'error',
   'fibonacciResult', 'fibonacciIterResult', 'fibonacciBatchResult', 'fibonacciBatchJsResult', 'fibonacciIterBatchResult',
   'sharedMemoryReady', 'sharedMemoryProcessDone', 'sharedBufferDone', 'sumArrayResult', 'sumArraySabResult',
   'dotProductSimdResult', 'sumF32SimdResult',
   'grayscaleDone', 'boxBlurDone', 'fftDemoDone', 'generateSignalDone',
   'matrixMultiplyDone', 'matrixMultiplyJsDone', 'matrixMultiplyStrassenDone', 'matrixMultiplyJsBenchDone', 'matrixMultiplyWasmBenchDone',
   'quicksortDone', 'quicksortJsDone', 'quicksortJsBenchDone', 'quicksortWasmBenchDone'
-]);
+] as const;
+
+const validResponseTypes: ReadonlySet<string> = new Set(WORKER_RESPONSE_TYPES);
 
 export const isWorkerResponse = (value: unknown): value is WorkerResponse => {
   if (!isRecord(value) || value.version !== WORKER_PROTOCOL_VERSION) return false;
